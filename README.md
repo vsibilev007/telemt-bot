@@ -49,7 +49,7 @@ source venv/bin/activate
 pip install -r requirements.txt
 
 # 3. Конфиг
-cp env.example .env
+cp .env.example .env
 nano .env   # BOT_TOKEN, ALLOWED_USERS, SERVER_URL
 
 # 4. Запуск
@@ -57,6 +57,9 @@ python bot.py
 ```
 
 ## Установка через systemd
+
+> ⚠️ **Замени `/opt/telemt_bot` на реальный путь к боту на своём сервере.**
+> Например, если бот лежит в `/opt/telemt_bot` — замени все вхождения.
 
 ```ini
 # /etc/systemd/system/telemt-bot.service
@@ -67,9 +70,9 @@ After=network.target
 [Service]
 Type=simple
 User=root
-WorkingDirectory=/root/telemt_bot
-EnvironmentFile=/root/telemt_bot/.env
-ExecStart=/root/telemt_bot/venv/bin/python bot.py
+WorkingDirectory=/opt/telemt_bot        # ← путь к директории бота
+EnvironmentFile=/opt/telemt_bot/.env    # ← путь к .env файлу
+ExecStart=/opt/telemt_bot/venv/bin/python bot.py  # ← путь к venv
 Restart=on-failure
 RestartSec=5
 
@@ -89,19 +92,19 @@ journalctl -u telemt-bot -f
 |-----------|----------|--------|
 | `BOT_TOKEN` | Токен бота от @BotFather | `1234:AABBcc...` |
 | `ALLOWED_USERS` | Telegram user_id через запятую | `123456,789012` |
-| `SERVER_URL` | URL Control API telemt | `http://127.0.0.1:9091` |
+| `SERVER_URL` | URL Control API telemt | `http://IP:9091` |
 | `SERVER_NAME` | Имя сервера в меню | `My Telemt` |
 | `SERVER_AUTH` | Authorization header (если задан) | `secret-token` |
 
 ### Несколько серверов
 
 ```env
-SERVER_1_URL=http://10.0.0.1:9091
-SERVER_1_NAME=RU Server
+SERVER_1_URL=http://IP:9091
+SERVER_1_NAME= Server 1
 SERVER_1_AUTH=secret1
 
-SERVER_2_URL=http://10.0.0.2:9091
-SERVER_2_NAME=EU Server
+SERVER_2_URL=http://IP:9091
+SERVER_2_NAME= Server 2
 SERVER_2_AUTH=secret2
 ```
 
