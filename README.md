@@ -40,7 +40,7 @@ Telegram-бот для управления [Telemt MTProxy](https://github.com/
 
 ```bash
 # 1. Клонировать
-git clone https://github.com/yourname/telemt-bot.git
+git clone https://github.com/vsibilev007/telemt-bot.git
 cd telemt-bot
 
 # 2. Виртуальное окружение
@@ -49,7 +49,7 @@ source venv/bin/activate
 pip install -r requirements.txt
 
 # 3. Конфиг
-cp .env.example .env
+cp env.example .env
 nano .env   # BOT_TOKEN, ALLOWED_USERS, SERVER_URL
 
 # 4. Запуск
