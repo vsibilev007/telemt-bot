@@ -10,7 +10,7 @@ Telegram-бот для управления [Telemt MTProxy](https://github.com/
 ⚡ Runtime              ⚠️ Истекающие
 🔒 Безопасность         🔗 Upstreams
 📡 DC / Writers         📤 Бэкап
-✅ My Telemt            Disk_test        ← переключатель серверов
+✅ Server 1             Server 2        ← переключатель серверов
 ```
 
 ## Возможности
