@@ -3,25 +3,19 @@
 """
 
 from __future__ import annotations
-
 import json
 import logging
-from datetime import datetime, timezone
-
 import aiosqlite
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.interval import IntervalTrigger
-
-from api_client import TelemetClient, ApiError
-from config import Config
 import database as db
+from api_client import TelemetClient
+from config import Config
 
 logger = logging.getLogger(__name__)
-
 _scheduler: AsyncIOScheduler | None = None
 _bot = None
 _config: Config | None = None
-
 DB_PATH = db.DB_PATH
 
 
@@ -30,7 +24,6 @@ def setup(bot, config: Config):
     _bot = bot
     _config = config
     _scheduler = AsyncIOScheduler(timezone="UTC")
-
     _scheduler.add_job(
         _collect_traffic,
         IntervalTrigger(minutes=15),
@@ -49,7 +42,6 @@ def setup(bot, config: Config):
         id="cleanup",
         replace_existing=True,
     )
-
     _scheduler.start()
     logger.info("Scheduler запущен")
 
@@ -58,8 +50,6 @@ def stop():
     if _scheduler:
         _scheduler.shutdown(wait=False)
 
-
-# ─── DB helpers ─────────────────────────────────────────────────────────────
 
 async def _get_meta(server_name: str, key: str) -> str | None:
     async with aiosqlite.connect(DB_PATH) as conn:
@@ -82,8 +72,6 @@ async def _set_meta(server_name: str, key: str, value: str):
         await conn.commit()
 
 
-# ─── Tasks ──────────────────────────────────────────────────────────────────
-
 async def _collect_traffic():
     if not _config:
         return
@@ -101,58 +89,51 @@ async def _collect_traffic():
 async def _check_health():
     if not _config or not _bot:
         return
-
     for srv in _config.servers:
         try:
             client = TelemetClient(srv.url, srv.auth_header)
             health = await client.get_health()
             summary = await client.get_stats_summary()
-
             status = health.get("status", "unknown")
             connections = summary.get("connections_total", 0)
-
             prev = await db.get_server_status(srv.name)
             await db.update_server_status(srv.name, status, connections)
-
-            # Алерт: статус изменился на не-ok
             if prev and prev["status"] == "ok" and status != "ok":
                 await _fire_alert(
-                    srv.name, "status_down",
+                    srv.name,
+                    "status_down",
                     f"🔴 <b>{srv.name}</b> — статус изменился: <b>{status}</b>",
                 )
-
-            # Алерт: статус восстановился
             if prev and prev["status"] != "ok" and status == "ok":
                 await _fire_alert(
-                    srv.name, "status_up",
+                    srv.name,
+                    "status_up",
                     f"🟢 <b>{srv.name}</b> — статус восстановлен: <b>OK</b>",
                     cooldown=0,
                 )
-
-            # Алерт: резкий рост соединений (>50%)
             if prev and prev["connections"] > 100:
-                delta_pct = (connections - prev["connections"]) / prev["connections"] * 100
+                delta_pct = (
+                    (connections - prev["connections"]) / prev["connections"] * 100
+                )
                 if delta_pct > 50:
                     await _fire_alert(
-                        srv.name, "conn_spike",
+                        srv.name,
+                        "conn_spike",
                         f"⚠ <b>{srv.name}</b> — всплеск соединений: "
                         f"{prev['connections']:,} → {connections:,} (+{delta_pct:.0f}%)",
                     )
-
-            # Алерт: ME Writers coverage < 80%
             try:
                 writers = await client.get_stats_me_writers()
                 summary_w = writers.get("summary", {})
                 coverage = summary_w.get("coverage_pct", 100)
                 if coverage < 80:
                     await _fire_alert(
-                        srv.name, "writers_low",
+                        srv.name,
+                        "writers_low",
                         f"⚠ <b>{srv.name}</b> — ME Writers coverage низкий: {coverage:.0f}%",
                     )
             except Exception:
                 pass
-
-            # Алерт: изменилась версия
             try:
                 sysinfo = await client.get_system_info()
                 version = sysinfo.get("version", "")
@@ -161,15 +142,14 @@ async def _check_health():
                     await _set_meta(srv.name, "version", version)
                     if prev_version and prev_version != version:
                         await _fire_alert(
-                            srv.name, "version_change",
+                            srv.name,
+                            "version_change",
                             f"🏷 <b>{srv.name}</b> — обновление telemt: "
                             f"<b>v{prev_version}</b> → <b>v{version}</b>",
                             cooldown=0,
                         )
             except Exception:
                 pass
-
-            # Алерт: мониторинг счётчиков bad/handshake классов
             try:
                 bad_by_class = {
                     e["class"]: e["total"]
@@ -181,72 +161,72 @@ async def _check_health():
                 }
                 current_counters = {**bad_by_class, **hs_by_class}
                 prev_counters_raw = await _get_meta(srv.name, "counters")
-                prev_counters = json.loads(prev_counters_raw) if prev_counters_raw else {}
+                prev_counters = (
+                    json.loads(prev_counters_raw) if prev_counters_raw else {}
+                )
                 await _set_meta(srv.name, "counters", json.dumps(current_counters))
-
                 if prev_counters:
+
                     def delta(key):
                         return current_counters.get(key, 0) - prev_counters.get(key, 0)
 
-                    # Неизвестный SNI — любой рост
                     d_sni = delta("unknown_tls_sni")
                     if d_sni > 0:
                         await _fire_alert(
-                            srv.name, "bad_unknown_sni",
+                            srv.name,
+                            "bad_unknown_sni",
                             f"⚠ <b>{srv.name}</b> — неизвестный SNI: +{d_sni} за 2 мин",
                             cooldown=300,
                         )
-
-                    # Всплеск handshake timeout — порог +50 за 2 мин
                     d_hs_timeout = delta("timeout")
                     if d_hs_timeout >= 50:
                         await _fire_alert(
-                            srv.name, "hs_timeout_spike",
+                            srv.name,
+                            "hs_timeout_spike",
                             f"⚠ <b>{srv.name}</b> — всплеск handshake timeout: +{d_hs_timeout} за 2 мин",
                             cooldown=120,
                         )
-
-                    # Всплеск плохих TLS клиентов — порог +100 за 2 мин
                     d_bad_client = delta("tls_handshake_bad_client")
                     if d_bad_client >= 100:
                         await _fire_alert(
-                            srv.name, "bad_client_spike",
+                            srv.name,
+                            "bad_client_spike",
                             f"⚠ <b>{srv.name}</b> — всплеск плохих TLS клиентов: +{d_bad_client} за 2 мин",
                             cooldown=120,
                         )
-
-                    # Сброс соединений при handshake — любой рост
                     d_reset = delta("expected_64_got_0_connection_reset")
                     if d_reset > 0:
                         await _fire_alert(
-                            srv.name, "hs_conn_reset",
+                            srv.name,
+                            "hs_conn_reset",
                             f"⚠ <b>{srv.name}</b> — сброс соединений при handshake: +{d_reset} за 2 мин",
                             cooldown=300,
                         )
             except Exception:
                 pass
-
         except Exception as e:
             prev = await db.get_server_status(srv.name)
             if not prev or prev["status"] != "unreachable":
                 await db.update_server_status(srv.name, "unreachable", 0)
                 await _fire_alert(
-                    srv.name, "unreachable",
+                    srv.name,
+                    "unreachable",
                     f"🔴 <b>{srv.name}</b> — сервер недоступен: {type(e).__name__}",
                     cooldown=300,
                 )
 
 
-async def _fire_alert(server_name: str, alert_type: str, message: str, cooldown: int = 120):
+async def _fire_alert(
+    server_name: str, alert_type: str, message: str, cooldown: int = 120
+):
     """Отправляет алерт всем пользователям у которых включён этот тип алерта"""
-    if cooldown > 0 and await db.was_alert_fired_recently(server_name, alert_type, cooldown):
+    if cooldown > 0 and await db.was_alert_fired_recently(
+        server_name, alert_type, cooldown
+    ):
         return
-
     await db.log_alert(server_name, alert_type, message)
-
     if not _bot or not _config:
         return
-
     for user_id in _config.allowed_users:
         try:
             enabled = await db.get_alert(user_id, server_name, alert_type)
