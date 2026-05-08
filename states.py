@@ -1,5 +1,6 @@
 from aiogram.fsm.state import State, StatesGroup
 
+
 class CreateUserFSM(StatesGroup):
     username = State()
     secret = State()
@@ -9,8 +10,10 @@ class CreateUserFSM(StatesGroup):
     max_ips = State()
     confirm = State()
 
+
 class EditFieldFSM(StatesGroup):
     waiting_value = State()
+
 
 class QuickAddFSM(StatesGroup):
     waiting_name = State()

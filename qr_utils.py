@@ -3,7 +3,6 @@
 """
 
 from __future__ import annotations
-
 import io
 import qrcode
 from qrcode.image.pil import PilImage
@@ -19,9 +18,7 @@ def make_qr_bytes(text: str, border: int = 2) -> bytes:
     )
     qr.add_data(text)
     qr.make(fit=True)
-
     img: PilImage = qr.make_image(fill_color="black", back_color="white")
-
     buf = io.BytesIO()
     img.save(buf, format="PNG")
     buf.seek(0)

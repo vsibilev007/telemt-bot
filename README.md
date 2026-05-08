@@ -35,6 +35,7 @@ Telegram-бот для управления [Telemt MTProxy](https://github.com/
 
 - Python 3.11+
 - Telemt MTProxy с включённым Control API (`api_addr = "127.0.0.1:9091"`)
+- [uv](https://docs.astral.sh/uv/)
 
 ## Быстрый старт
 
@@ -43,16 +44,18 @@ Telegram-бот для управления [Telemt MTProxy](https://github.com/
 git clone https://github.com/vsibilev007/telemt-bot.git
 cd telemt-bot
 
-# 2. Виртуальное окружение
-python3 -m venv venv
-source venv/bin/activate
+# Виртуальное окружение
+uv sync
+# ЛИБО: Системно (Windows)
 pip install -r requirements.txt
 
 # 3. Конфиг
-cp env.example .env
+cp .env.example .env
 nano .env   # BOT_TOKEN, ALLOWED_USERS, SERVER_URL
 
-# 4. Запуск
+# Запуск с uv
+uv run bot.py
+# ЛИБО: Запуск
 python bot.py
 ```
 
@@ -72,7 +75,7 @@ Type=simple
 User=root
 WorkingDirectory=/opt/telemt_bot        # ← путь к директории бота
 EnvironmentFile=/opt/telemt_bot/.env    # ← путь к .env файлу
-ExecStart=/opt/telemt_bot/venv/bin/python bot.py  # ← путь к venv
+ExecStart=/opt/telemt_bot/.venv/bin/python bot.py  # ← путь к venv
 Restart=on-failure
 RestartSec=5
 

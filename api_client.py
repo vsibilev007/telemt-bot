@@ -3,15 +3,11 @@
 """
 
 from __future__ import annotations
-
-import asyncio
 import logging
-from typing import Any, Optional
-
+from typing import Any
 import aiohttp
 
 logger = logging.getLogger(__name__)
-
 TIMEOUT = aiohttp.ClientTimeout(total=10)
 
 
@@ -39,17 +35,14 @@ class TelemetClient:
         method: str,
         path: str,
         json: Any = None,
-        if_match: Optional[str] = None,
+        if_match: str | None = None,
     ) -> dict:
         url = f"{self.base_url}/v1{path}"
         headers = self._headers()
         if if_match:
             headers["If-Match"] = if_match
-
         async with aiohttp.ClientSession(timeout=TIMEOUT) as session:
-            async with session.request(
-                method, url, headers=headers, json=json
-            ) as resp:
+            async with session.request(method, url, headers=headers, json=json) as resp:
                 data = await resp.json(content_type=None)
                 if not data.get("ok"):
                     err = data.get("error", {})

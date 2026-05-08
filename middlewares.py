@@ -2,10 +2,10 @@
 Middleware авторизации — пропускает только пользователей из списка ALLOWED_USERS
 """
 
-from typing import Any, Awaitable, Callable
-
+from collections.abc import Awaitable, Callable
+from typing import Any
 from aiogram import BaseMiddleware
-from aiogram.types import Message, CallbackQuery, TelegramObject
+from aiogram.types import CallbackQuery, Message, TelegramObject
 
 
 class AuthMiddleware(BaseMiddleware):
@@ -20,13 +20,11 @@ class AuthMiddleware(BaseMiddleware):
     ) -> Any:
         user = data.get("event_from_user")
         if user is None:
-            return
-
+            return None
         if user.id not in self.allowed_users:
             if isinstance(event, Message):
                 await event.answer("⛔ Доступ запрещён.")
             elif isinstance(event, CallbackQuery):
                 await event.answer("⛔ Доступ запрещён.", show_alert=True)
-            return
-
+            return None
         return await handler(event, data)

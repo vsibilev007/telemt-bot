@@ -3,15 +3,11 @@ SQLite БД для хранения истории трафика и настр�
 """
 
 from __future__ import annotations
-
-import asyncio
 import logging
-from datetime import datetime, timezone
-
+from datetime import UTC, datetime
 import aiosqlite
 
 logger = logging.getLogger(__name__)
-
 DB_PATH = "telemt_bot.db"
 
 
@@ -62,9 +58,15 @@ async def init_db():
 
 
 async def save_traffic_snapshot(server_name: str, users: list):
-    now = int(datetime.now(timezone.utc).timestamp())
+    now = int(datetime.now(UTC).timestamp())
     rows = [
-        (server_name, u["username"], u.get("total_octets", 0), u.get("current_connections", 0), now)
+        (
+            server_name,
+            u["username"],
+            u.get("total_octets", 0),
+            u.get("current_connections", 0),
+            now,
+        )
         for u in users
     ]
     async with aiosqlite.connect(DB_PATH) as db:
@@ -75,8 +77,10 @@ async def save_traffic_snapshot(server_name: str, users: list):
         await db.commit()
 
 
-async def get_traffic_history(server_name: str, username: str, days: int = 7) -> list[dict]:
-    since = int(datetime.now(timezone.utc).timestamp()) - days * 86400
+async def get_traffic_history(
+    server_name: str, username: str, days: int = 7
+) -> list[dict]:
+    since = int(datetime.now(UTC).timestamp()) - days * 86400
     async with aiosqlite.connect(DB_PATH) as db:
         db.row_factory = aiosqlite.Row
         async with db.execute(
@@ -106,7 +110,7 @@ async def get_traffic_delta(server_name: str, username: str, days: int = 7) -> d
 
 async def get_all_users_traffic_delta(server_name: str, days: int = 7) -> list[dict]:
     """Дельта трафика всех пользователей за период — для сводки"""
-    since = int(datetime.now(timezone.utc).timestamp()) - days * 86400
+    since = int(datetime.now(UTC).timestamp()) - days * 86400
     async with aiosqlite.connect(DB_PATH) as db:
         db.row_factory = aiosqlite.Row
         async with db.execute(
@@ -124,7 +128,7 @@ async def get_all_users_traffic_delta(server_name: str, days: int = 7) -> list[d
 
 
 async def update_server_status(server_name: str, status: str, connections: int):
-    now = int(datetime.now(timezone.utc).timestamp())
+    now = int(datetime.now(UTC).timestamp())
     async with aiosqlite.connect(DB_PATH) as db:
         await db.execute(
             """INSERT INTO server_status(server_name, status, connections, checked_at)
@@ -148,7 +152,13 @@ async def get_server_status(server_name: str) -> dict | None:
             return dict(row) if row else None
 
 
-async def set_alert(user_id: int, server_name: str, alert_type: str, threshold: float | None, enabled: bool = True):
+async def set_alert(
+    user_id: int,
+    server_name: str,
+    alert_type: str,
+    threshold: float | None,
+    enabled: bool = True,
+):
     async with aiosqlite.connect(DB_PATH) as db:
         await db.execute(
             """INSERT INTO alert_settings(user_id, server_name, alert_type, threshold, enabled)
@@ -171,7 +181,7 @@ async def get_alerts(user_id: int) -> list[dict]:
 
 
 async def log_alert(server_name: str, alert_type: str, message: str):
-    now = int(datetime.now(timezone.utc).timestamp())
+    now = int(datetime.now(UTC).timestamp())
     async with aiosqlite.connect(DB_PATH) as db:
         await db.execute(
             "INSERT INTO alert_log(server_name, alert_type, message, fired_at) VALUES(?,?,?,?)",
@@ -180,8 +190,10 @@ async def log_alert(server_name: str, alert_type: str, message: str):
         await db.commit()
 
 
-async def was_alert_fired_recently(server_name: str, alert_type: str, within_secs: int = 300) -> bool:
-    since = int(datetime.now(timezone.utc).timestamp()) - within_secs
+async def was_alert_fired_recently(
+    server_name: str, alert_type: str, within_secs: int = 300
+) -> bool:
+    since = int(datetime.now(UTC).timestamp()) - within_secs
     async with aiosqlite.connect(DB_PATH) as db:
         async with db.execute(
             "SELECT 1 FROM alert_log WHERE server_name=? AND alert_type=? AND fired_at>? LIMIT 1",
@@ -191,7 +203,7 @@ async def was_alert_fired_recently(server_name: str, alert_type: str, within_sec
 
 
 async def cleanup_old_data(days: int = 30):
-    cutoff = int(datetime.now(timezone.utc).timestamp()) - days * 86400
+    cutoff = int(datetime.now(UTC).timestamp()) - days * 86400
     async with aiosqlite.connect(DB_PATH) as db:
         await db.execute("DELETE FROM traffic_history WHERE sampled_at<?", (cutoff,))
         await db.execute("DELETE FROM alert_log WHERE fired_at<?", (cutoff,))

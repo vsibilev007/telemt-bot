@@ -3,7 +3,6 @@
 """
 
 from __future__ import annotations
-
 from api_client import TelemetClient
 from config import Config, ServerConfig
 
