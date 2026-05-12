@@ -3,12 +3,12 @@ from aiogram.fsm.state import State, StatesGroup
 
 class CreateUserFSM(StatesGroup):
     username = State()
-    secret = State()
-    max_tcp = State()
+    secret   = State()
+    max_tcp  = State()
     expiration = State()
-    quota = State()
-    max_ips = State()
-    confirm = State()
+    quota    = State()
+    max_ips  = State()
+    confirm  = State()
 
 
 class EditFieldFSM(StatesGroup):
@@ -17,3 +17,7 @@ class EditFieldFSM(StatesGroup):
 
 class QuickAddFSM(StatesGroup):
     waiting_name = State()
+
+
+class SearchUserFSM(StatesGroup):
+    waiting_query = State()
