@@ -1,3 +1,4 @@
+#!/usr/bin/env python3
 """
 Telemt MTProxy Manager Bot
 """
@@ -5,6 +6,7 @@ Telemt MTProxy Manager Bot
 import asyncio
 import logging
 import sys
+
 from aiogram import Bot, Dispatcher
 from aiogram.client.default import DefaultBotProperties
 from aiogram.enums import ParseMode
@@ -14,31 +16,28 @@ from aiogram.types import (
     BotCommandScopeDefault,
     MenuButtonCommands,
 )
-import database as db
-import scheduler as sched
+
 from config import load_config
 from handlers import router
+from logging_setup import setup_logging
 from middlewares import AuthMiddleware
+import database as db
+import scheduler as sched
 
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
-    stream=sys.stdout,
-)
+setup_logging()
 logger = logging.getLogger(__name__)
 
 
 async def setup_bot_menu(bot: Bot):
-    """
-    Устанавливает команды в кнопку Меню рядом со скрепкой —
-    точно как на скриншоте 3x-ui бота
-    """
+    """Устанавливает команды в кнопку Меню."""
     commands = [
-        BotCommand(command="start", description="Показать главное меню"),
-        BotCommand(command="help", description="Справка по боту"),
-        BotCommand(command="status", description="Проверить статус бота"),
-        BotCommand(command="alerts", description="Настройки алертов"),
-        BotCommand(command="id", description="Показать ваш Telegram ID"),
+        BotCommand(command="menu",      description="Главное меню"),
+        BotCommand(command="help",      description="Справка по боту"),
+        BotCommand(command="adduser",   description="Быстро создать клиента"),
+        BotCommand(command="find",      description="Поиск клиента по имени"),
+        BotCommand(command="alerts",    description="Настройки алертов"),
+        BotCommand(command="alert_log", description="История последних алертов"),
+        BotCommand(command="id",        description="Ваш Telegram ID"),
     ]
     await bot.set_my_commands(commands, scope=BotCommandScopeDefault())
     await bot.set_chat_menu_button(menu_button=MenuButtonCommands())
@@ -47,24 +46,36 @@ async def setup_bot_menu(bot: Bot):
 
 async def main():
     config = load_config()
+
     await db.init_db()
+
     bot = Bot(
         token=config.bot_token,
         default=DefaultBotProperties(parse_mode=ParseMode.HTML),
     )
     dp = Dispatcher(storage=MemoryStorage())
     dp["config"] = config
+
     dp.message.middleware(AuthMiddleware(config.allowed_users))
     dp.callback_query.middleware(AuthMiddleware(config.allowed_users))
+
     dp.include_router(router)
+
     await setup_bot_menu(bot)
     sched.setup(bot, config)
-    logger.info("Бот запущен, серверов: %d", len(config.servers))
+
+    logger.info(
+        "Бот запущен | серверов: %d | юзеров: %d",
+        len(config.servers),
+        len(config.allowed_users),
+    )
+
     try:
         await dp.start_polling(bot, allowed_updates=dp.resolve_used_update_types())
     finally:
         sched.stop()
         await bot.session.close()
+        logger.info("Бот остановлен")
 
 
 if __name__ == "__main__":

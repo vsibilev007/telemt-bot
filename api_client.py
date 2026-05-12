@@ -3,12 +3,25 @@
 """
 
 from __future__ import annotations
+
+import asyncio
 import logging
-from typing import Any
+from typing import Any, Optional
+
 import aiohttp
 
 logger = logging.getLogger(__name__)
-TIMEOUT = aiohttp.ClientTimeout(total=10)
+
+TIMEOUT = aiohttp.ClientTimeout(total=10, connect=3)
+
+# Ограничение параллельных запросов к одному инстансу API
+_semaphores: dict[str, asyncio.Semaphore] = {}
+
+
+def _get_semaphore(base_url: str) -> asyncio.Semaphore:
+    if base_url not in _semaphores:
+        _semaphores[base_url] = asyncio.Semaphore(5)
+    return _semaphores[base_url]
 
 
 class ApiError(Exception):
@@ -35,23 +48,35 @@ class TelemetClient:
         method: str,
         path: str,
         json: Any = None,
-        if_match: str | None = None,
+        if_match: Optional[str] = None,
     ) -> dict:
         url = f"{self.base_url}/v1{path}"
         headers = self._headers()
         if if_match:
             headers["If-Match"] = if_match
-        async with aiohttp.ClientSession(timeout=TIMEOUT) as session:
-            async with session.request(method, url, headers=headers, json=json) as resp:
-                data = await resp.json(content_type=None)
-                if not data.get("ok"):
-                    err = data.get("error", {})
-                    raise ApiError(
-                        code=err.get("code", "unknown"),
-                        message=err.get("message", str(data)),
-                        status=resp.status,
-                    )
-                return data.get("data", {})
+
+        sem = _get_semaphore(self.base_url)
+        async with sem:
+            try:
+                async with aiohttp.ClientSession(timeout=TIMEOUT) as session:
+                    async with session.request(
+                        method, url, headers=headers, json=json
+                    ) as resp:
+                        data = await resp.json(content_type=None)
+                        if not data.get("ok"):
+                            err = data.get("error", {})
+                            raise ApiError(
+                                code=err.get("code", "unknown"),
+                                message=err.get("message", str(data)),
+                                status=resp.status,
+                            )
+                        return data.get("data", {})
+            except aiohttp.ServerTimeoutError:
+                raise ApiError("timeout", f"Нет ответа от API за 10с", status=0)
+            except aiohttp.ClientConnectorError as e:
+                raise ApiError("unreachable", f"Не удалось подключиться: {e}", status=0)
+
+    # ─── Endpoints ───────────────────────────────────────────────────────────
 
     async def get_health(self) -> dict:
         return await self._request("GET", "/health")
@@ -100,9 +125,7 @@ class TelemetClient:
 
     async def get_users(self) -> list:
         result = await self._request("GET", "/users")
-        if isinstance(result, list):
-            return result
-        return []
+        return result if isinstance(result, list) else []
 
     async def get_user(self, username: str) -> dict:
         return await self._request("GET", f"/users/{username}")
@@ -117,7 +140,6 @@ class TelemetClient:
         return await self._request("DELETE", f"/users/{username}")
 
     async def ping(self) -> bool:
-        """Быстрая проверка доступности API"""
         try:
             await self.get_health()
             return True
