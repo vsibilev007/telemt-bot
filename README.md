@@ -10,32 +10,45 @@ Telegram-бот для управления [Telemt MTProxy](https://github.com/
 ⚡ Runtime              ⚠️ Истекающие
 🔒 Безопасность         🔗 Upstreams
 📡 DC / Writers         📤 Бэкап
-✅ Server 1             Server 2        ← переключатель серверов
+✅ Server 1               Server 2       ← переключатель серверов
 ```
 
 ## Возможности
 
 | Раздел | Функции |
 |--------|---------|
-| 🟢 Состояние сервера | Dashboard telemt: статус, uptime, версия, соединения, bad-классы, handshake |
-| 📊 Отчёт по трафику | Все клиенты за 1/7/30 дней, сортировка по потреблению, пометка истёкших |
-| 👥 Клиенты | Список с пагинацией, трафик и кол-во соединений на кнопке |
-| 🗒 Карточка клиента | Просмотр, редактирование полей, смена секрета, история трафика, QR-коды |
+| 🟢 Состояние сервера | Dashboard: статус, uptime, версия, соединения, bad-классы, handshake-ошибки, время обновления |
+| 📊 Отчёт по трафику | Все клиенты за 1/7/30 дней, сортировка по потреблению, пометка истёкших, 📈 график топ-15 |
+| 👥 Клиенты | Список с пагинацией, 🔍 поиск по имени, трафик и соединения на кнопке |
+| 🗒 Карточка клиента | Просмотр, редактирование полей, смена секрета, 📊 история трафика с 📈 графиком (24ч/7/14/30д), QR-коды |
 | ➕ Новый клиент | FSM-мастер (6 шагов) или быстрая команда `/adduser имя [дней]` |
-| ⚠️ Истекающие | Список + массовое удаление истёкших |
+| ⚠️ Истекающие | Список клиентов с истекающим сроком + массовое удаление истёкших |
 | 📤 Бэкап | Выгрузка `telemt.toml` файлом в чат |
 | ⚡ Runtime | Gates, Init, ME Quality, Upstream Quality, Events, Connections |
 | 🔒 Безопасность | Posture, IP Whitelist, Effective Limits |
-| 📡 DC / Writers | DC Status, ME Writers по DC |
+| 📡 DC / Writers | DC Status, ME Writers по датацентрам |
 | 🔗 Upstreams | Список апстримов с RTT и статусом |
-| 🔔 Алерты | 9 типов: падение, восстановление, всплески SNI/TLS/timeout/reset, версия |
-| 🖥 Мультисервер | Переключение между инстансами Telemt из главного меню |
+| 🔔 Алерты | 9 типов + алерт квоты. Настройка через `/alerts`, история через `/alert_log` |
+| 🖥 Мультисервер | Переключение между инстансами из главного меню, выбор сохраняется между перезапусками |
+
+## Команды
+
+| Команда | Описание |
+|---------|----------|
+| `/menu` | Главное меню |
+| `/help` | Справка по боту |
+| `/adduser имя [дней]` | Быстро создать клиента, пример: `/adduser vasya 30` |
+| `/find запрос` | Поиск клиента по имени, пример: `/find vas` |
+| `/alerts` | Включить / выключить алерты |
+| `/alert_log` | История последних 20 алертов |
+| `/id` | Ваш Telegram ID |
 
 ## Требования
 
 - Python 3.11+
 - Telemt MTProxy с включённым Control API (`api_addr = "127.0.0.1:9091"`)
-- [uv](https://docs.astral.sh/uv/)
+- `matplotlib` — для графиков трафика (опционально, бот работает и без него)
+- uv
 
 ## Быстрый старт
 
@@ -59,14 +72,14 @@ uv run bot.py
 python bot.py
 ```
 
+
 ## Установка через systemd
 
-> ⚠️ **Замени `/opt/telemt_bot` на реальный путь к боту на своём сервере.**
-> Например, если бот лежит в `/opt/telemt_bot` — замени все вхождения.
+> ⚠️ **Замени `/root/telemt_bot` на реальный путь к боту на своём сервере.**
 
 ```ini
 # /etc/systemd/system/telemt-bot.service
-[Unit]
+[[Unit]
 Description=Telemt Manager Bot
 After=network.target
 
@@ -98,6 +111,7 @@ journalctl -u telemt-bot -f
 | `SERVER_URL` | URL Control API telemt | `http://IP:9091` |
 | `SERVER_NAME` | Имя сервера в меню | `My Telemt` |
 | `SERVER_AUTH` | Authorization header (если задан) | `secret-token` |
+| `TZ` | Часовой пояс для отображения времени | `Europe/Moscow` |
 
 ### Несколько серверов
 
@@ -111,13 +125,34 @@ SERVER_2_NAME= Server 2
 SERVER_2_AUTH=secret2
 ```
 
+### Пороги алертов (опционально)
+
+```env
+ALERT_CONN_SPIKE_PCT=50       # всплеск соединений, %
+ALERT_CONN_SPIKE_MIN_BASE=100 # мин. база соединений для срабатывания
+ALERT_WRITERS_LOW_PCT=80      # порог coverage ME Writers, %
+ALERT_HS_TIMEOUT_SPIKE=50     # handshake timeout, +N за 2 мин
+ALERT_BAD_CLIENT_SPIKE=100    # плохих TLS клиентов, +N за 2 мин
+ALERT_QUOTA_PCT=80            # алерт при использовании N% квоты клиента
+```
+
+### Логирование
+
+```env
+LOG_LEVEL=INFO          # DEBUG / INFO / WARNING / ERROR
+LOG_FILE=telemt_bot.log # путь к файлу (пусто = только stdout)
+LOG_MAX_MB=10           # макс. размер файла до ротации
+LOG_BACKUPS=3           # кол-во резервных файлов
+NO_COLOR=1              # отключить цвета (для non-tty окружений)
+```
+
 ## Алерты
 
-Настраиваются командой `/alerts`. Каждый тип можно включить/выключить отдельно:
+Настраиваются командой `/alerts`. Каждый тип включается/выключается отдельно:
 
 | Тип | Описание | Cooldown |
 |-----|----------|----------|
-| `status_down` | Сервер стал недоступен | 2 мин |
+| `status_down` | Сервер стал недоступен | 5 мин |
 | `status_up` | Сервер восстановился | — |
 | `conn_spike` | Всплеск соединений >50% | 2 мин |
 | `writers_low` | ME Writers coverage <80% | 2 мин |
@@ -126,30 +161,36 @@ SERVER_2_AUTH=secret2
 | `hs_timeout_spike` | Handshake timeout +50 за 2 мин | 2 мин |
 | `bad_client_spike` | Плохих TLS клиентов +100 за 2 мин | 2 мин |
 | `hs_conn_reset` | Сброс при handshake (любой рост) | 5 мин |
+| `quota_warn` | Клиент использовал ≥80% квоты | 1 час |
+
+История сработавших алертов — команда `/alert_log`.
 
 ## Фоновые задачи
 
 | Задача | Интервал | Описание |
 |--------|----------|----------|
-| Проверка здоровья + алерты | 2 мин | `GET /health`, `/stats/summary`, алерты |
-| Сбор трафика | 15 мин | Снимки в SQLite для истории |
+| Проверка здоровья + алерты | 2 мин | `GET /health`, `/stats/summary`, все алерты |
+| Сбор трафика | 15 мин | Снимки трафика в SQLite для графиков и истории |
 | Очистка БД | 24 ч | Удаление данных старше 30 дней |
 
 ## Структура проекта
 
 ```
 telemt_bot/
-├── bot.py            # Точка входа, инициализация
-├── config.py         # Загрузка конфига из .env
+├── bot.py            # Точка входа, инициализация, команды Меню
+├── config.py         # Загрузка конфига из .env, пороги алертов
 ├── handlers.py       # Все обработчики команд и callback
-├── keyboards.py      # Inline-клавиатуры
+├── keyboards.py      # Inline-клавиатуры (chart_mode и текстовый режим)
 ├── formatters.py     # Форматирование ответов API в HTML
-├── api_client.py     # HTTP-клиент для Telemt Control API
-├── database.py       # SQLite: трафик, алерты, статусы
-├── scheduler.py      # Фоновые задачи (APScheduler)
-├── session.py        # Выбор активного сервера для юзера
-├── middlewares.py    # Авторизация
-├── states.py         # FSM-состояния
+├── charts.py         # Графики трафика через matplotlib (тёмная тема)
+├── api_client.py     # HTTP-клиент для Telemt Control API (semaphore, timeout)
+├── database.py       # SQLite: трафик, алерты, статусы, сессии пользователей
+├── scheduler.py      # Фоновые задачи (APScheduler) с safe_job декоратором
+├── session.py        # Выбор активного сервера (хранится в БД)
+├── logging_setup.py  # Цветной logging с ротацией файла
+├── tz.py             # Работа с часовыми поясами через TZ из .env
+├── middlewares.py    # Авторизация по ALLOWED_USERS
+├── states.py         # FSM-состояния (Create, Edit, Search)
 ├── sysinfo.py        # Системная информация (psutil)
 ├── qr_utils.py       # Генерация QR-кодов
 ├── export_toml.py    # Бэкап telemt.toml
@@ -165,6 +206,7 @@ aiogram==3.27.0          # Telegram Bot API framework
 aiohttp==3.13.5          # HTTP-клиент для API telemt
 aiosqlite==0.22.1        # Асинхронный SQLite
 APScheduler==3.11.2      # Планировщик фоновых задач
+matplotlib==3.10.3       # Графики трафика
 qrcode[pil]==8.2         # Генерация QR-кодов
 Pillow==12.1.1           # Работа с изображениями
 openpyxl==3.1.5          # Экспорт в Excel
