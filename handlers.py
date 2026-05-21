@@ -18,7 +18,7 @@ from aiogram.fsm.context import FSMContext
 from aiogram.types import BufferedInputFile, CallbackQuery, InputMediaPhoto, Message, ReplyKeyboardRemove
 
 
-from api_client import ApiError
+from api_client import ApiError, TelemetClient, cluster_write, cluster_read, cluster_users_with_nodes, NodeResult
 from config import Config
 import database as db
 from export_utils import users_to_csv, users_to_xlsx
@@ -33,6 +33,7 @@ from keyboards import (
     alerts_kb, dashboard_kb, dcs_kb, dcs_sub_kb, export_menu_kb,
     main_menu_kb, runtime_kb, runtime_sub_kb, security_kb, security_sub_kb,
     sysinfo_kb, traffic_period_kb, traffic_report_kb, upstreams_kb,
+    proxy_check_kb,
     user_delete_confirm_kb, user_detail_kb, user_edit_kb,
     user_links_kb, user_links_kb_no_links, users_delete_expired_confirm_kb,
     users_extra_kb, users_list_kb,
@@ -41,7 +42,8 @@ from qr_utils import make_qr_bytes, link_short_label
 from session import get_client, get_server_index, set_server_index
 from sysinfo import get_system_info, format_system_status
 import charts
-from states import CreateUserFSM, EditFieldFSM, QuickAddFSM, SearchUserFSM
+import proxy_checker as pc
+from states import CreateUserFSM, EditFieldFSM, QuickAddFSM, SearchUserFSM, ProxyCheckFSM
 from export_toml import router as export_toml_router
 from database import set_alert, get_alert
 
@@ -52,8 +54,68 @@ logger = logging.getLogger(__name__)
 
 
 def _is_command(message: Message) -> bool:
-    """Возвращает True если сообщение — команда бота (/start, /menu и т.д.)"""
-    return bool(message.text and message.text.startswith("/"))
+    """True если сообщение — команда бота.
+    /skip и /gen разрешены внутри FSM — они не считаются командами бота."""
+    if not message.text or not message.text.startswith("/"):
+        return False
+    FSM_INTERNALS = {"/skip", "/gen"}
+    cmd = message.text.split()[0].lower()
+    return cmd not in FSM_INTERNALS
+
+
+def _format_cluster_result(results: list[NodeResult]) -> str:
+    """Форматирует результат write-операции на кластере."""
+    lines = []
+    for r in results:
+        icon = "✅" if r.ok else "❌"
+        lines.append(f"{icon} <b>{r.server_name}</b>" + (f": {r.error}" if not r.ok else ""))
+    return "\n".join(lines)
+
+
+def _all_ok(results: list[NodeResult]) -> bool:
+    return all(r.ok for r in results)
+
+async def _cluster_section(
+    cq: CallbackQuery,
+    config: Config,
+    api_method: str,
+    formatter,
+    kb,
+    *args,
+):
+    """
+    Универсальный хелпер для разделов Runtime/Security/DC/Upstreams.
+    Для кластера — опрашивает все узлы параллельно и показывает данные каждого.
+    Для одиночного — стандартное поведение.
+    """
+    client, srv = await get_client(_uid(cq), config)
+    members = config.get_group_members(srv)
+
+    if config.is_cluster(srv):
+        await cq.answer()
+
+        async def _get_node(node_srv):
+            node_client = TelemetClient(node_srv.url, node_srv.auth_header)
+            try:
+                method = getattr(node_client, api_method)
+                data = await method(*args)
+                return node_srv.name, True, formatter(data)
+            except Exception as e:
+                return node_srv.name, False, f"🔴 Ошибка: {str(e)[:80]}"
+
+        results = await asyncio.gather(*[_get_node(m) for m in members])
+        sep = "─" * 28
+        lines = []
+        for name, ok, text in results:
+            lines += [f"<b>⚙️ {name}</b>", sep, text, ""]
+        await _safe_edit(cq, "\n".join(lines).rstrip(), reply_markup=kb)
+    else:
+        method = getattr(client, api_method)
+        data = await _api_call(cq, method, *args)
+        if data:
+            await _safe_edit(cq, formatter(data), reply_markup=kb)
+
+
 router = Router()
 router.include_router(export_toml_router)
 
@@ -136,8 +198,8 @@ async def cmd_start(message: Message, config: Config):
         reply_markup=ReplyKeyboardRemove(),
     )
     await message.answer(
-        f"<b>Telemt Manager</b> — <code>{srv.name}</code>",
-        reply_markup=main_menu_kb(config.servers, idx, conns, status),
+        f"<b>Telemt Manager</b> — <code>{srv.group if config.is_cluster(srv) else srv.name}</code>",
+        reply_markup=main_menu_kb(config.servers, idx, conns, status, config),
     )
 
 
@@ -149,8 +211,8 @@ async def cmd_menu(message: Message, config: Config):
     srv = config.servers[idx]
     status, conns = await _get_menu_state(uid, config)
     await message.answer(
-        f"<b>Telemt Manager</b> — <code>{srv.name}</code>",
-        reply_markup=main_menu_kb(config.servers, idx, conns, status),
+        f"<b>Telemt Manager</b> — <code>{srv.group if config.is_cluster(srv) else srv.name}</code>",
+        reply_markup=main_menu_kb(config.servers, idx, conns, status, config),
     )
 
 
@@ -161,8 +223,8 @@ async def cb_menu_main(cq: CallbackQuery, config: Config):
     idx = await get_server_index(uid, config)
     srv = config.servers[idx]
     status, conns = await _get_menu_state(uid, config)
-    text = f"<b>Telemt Manager</b> — <code>{srv.name}</code>"
-    kb = main_menu_kb(config.servers, idx, conns, status)
+    text = f"<b>Telemt Manager</b> — <code>{srv.group if srv.group else srv.name}</code>"
+    kb = main_menu_kb(config.servers, idx, conns, status, config)
 
     # Под фото/документом/стикером edit_text невозможен — удаляем и шлём заново
     if cq.message.text:
@@ -196,8 +258,8 @@ async def cb_server_select(cq: CallbackQuery, config: Config):
     status, conns = await _get_menu_state(_uid(cq), config)
     await _safe_edit(
         cq,
-        f"<b>Telemt Manager</b> — <code>{srv.name}</code>",
-        reply_markup=main_menu_kb(config.servers, idx, conns, status),
+        f"<b>Telemt Manager</b> — <code>{srv.group if config.is_cluster(srv) else srv.name}</code>",
+        reply_markup=main_menu_kb(config.servers, idx, conns, status, config),
     )
 
 
@@ -241,24 +303,58 @@ async def cb_sysinfo(cq: CallbackQuery, config: Config):
 
 async def _show_dashboard(cq: CallbackQuery, config: Config):
     client, srv = await get_client(_uid(cq), config)
-    try:
-        health, summary, sysinfo, gates, users = await asyncio.gather(
-            client.get_health(),
-            client.get_stats_summary(),
-            client.get_system_info(),
-            client.get_runtime_gates(),
-            client.get_users(),
+    members = config.get_group_members(srv)
+
+    if config.is_cluster(srv):
+        # Кластер — показываем состояние всех узлов
+        await cq.answer()
+
+        async def _get_node_data(node_srv):
+            node_client = TelemetClient(node_srv.url, node_srv.auth_header)
+            try:
+                health, summary, sysinfo, gates, users = await asyncio.gather(
+                    node_client.get_health(),
+                    node_client.get_stats_summary(),
+                    node_client.get_system_info(),
+                    node_client.get_runtime_gates(),
+                    node_client.get_users(),
+                )
+                online = sum(1 for u in users if u.get("current_connections", 0) > 0)
+                return node_srv.name, True, format_dashboard(
+                    health, summary, sysinfo, gates, node_srv.name, online
+                )
+            except Exception as e:
+                return node_srv.name, False, f"🔴 <b>{node_srv.name}</b> — недоступен: {e}"
+
+        results = await asyncio.gather(*[_get_node_data(m) for m in members])
+
+        # Собираем общий дашборд кластера
+        lines = [f"⚙️ <b>Кластер: {srv.group}</b>\n"]
+        for name, ok, text in results:
+            lines.append(f"{'─' * 30}")
+            lines.append(text)
+
+        text = "\n".join(lines)
+        await _safe_edit(cq, text, reply_markup=dashboard_kb())
+    else:
+        # Одиночный сервер — стандартный дашборд
+        try:
+            health, summary, sysinfo, gates, users = await asyncio.gather(
+                client.get_health(),
+                client.get_stats_summary(),
+                client.get_system_info(),
+                client.get_runtime_gates(),
+                client.get_users(),
+            )
+        except Exception as e:
+            await cq.answer(str(e)[:200], show_alert=True)
+            return
+        online_users = sum(1 for u in users if u.get("current_connections", 0) > 0)
+        await _safe_edit(
+            cq,
+            format_dashboard(health, summary, sysinfo, gates, srv.name, online_users),
+            reply_markup=dashboard_kb(),
         )
-    except Exception as e:
-        await cq.answer(str(e)[:200], show_alert=True)
-        return
-    # считаем онлайн пользователей
-    online_users = sum(1 for u in users if u.get("current_connections", 0) > 0)
-    await _safe_edit(
-        cq,
-        format_dashboard(health, summary, sysinfo, gates, srv.name,online_users),
-        reply_markup=dashboard_kb(),
-    )
 
 
 @router.callback_query(F.data.in_({"menu:dashboard", "dashboard:refresh"}))
@@ -301,7 +397,7 @@ async def cb_traffic_report(cq: CallbackQuery, config: Config):
     active = sum(1 for u in users if u.get("current_connections", 0) > 0)
 
     lines = [
-        f"📊 <b>Отчёт по трафику — {srv.name}</b>",
+        f"📊 <b>Отчёт по трафику — {srv.group if srv.group else srv.name}</b>",
         f"<i>Период: {days} дн  |  {len(users)} клиентов  |  {active} онлайн</i>",
         f"<b>Всего за период: {fmt_bytes(total_delta)}</b>",
         "",
@@ -345,13 +441,20 @@ async def cb_traffic_report(cq: CallbackQuery, config: Config):
 # ─── Users list ───────────────────────────────────────────────────────────────
 
 async def _show_users(cq: CallbackQuery, config: Config, page: int = 0):
-    client, _ = await get_client(_uid(cq), config)
-    users = await _api_call(cq, client.get_users)
-    if users is None:
-        return
+    client, srv = await get_client(_uid(cq), config)
+    members = config.get_group_members(srv)
+
+    if config.is_cluster(srv):
+        users = await cluster_users_with_nodes(members)
+    else:
+        users = await _api_call(cq, client.get_users)
+        if users is None:
+            return
+
     active = sum(1 for u in users if u.get("current_connections", 0) > 0)
-    header = f"<b>👥 Клиенты</b>  {active} онлайн / {len(users)} всего"
-    await _safe_edit(cq, header, reply_markup=users_list_kb(users, page))
+    cluster_hint = f" ⚙️ {srv.group}" if config.is_cluster(srv) else ""
+    header = f"<b>👥 Клиенты{cluster_hint}</b>  {active} онлайн / {len(users)} всего"
+    await _safe_edit(cq, header, reply_markup=users_list_kb(users, page, config=config, cluster=config.is_cluster(srv)))
 
 
 @router.callback_query(F.data == "menu:users")
@@ -419,9 +522,13 @@ async def cb_users_export(cq: CallbackQuery, config: Config):
 @router.callback_query(F.data.in_({"users:expiring", "users:expiring_menu"}))
 async def cb_users_expiring(cq: CallbackQuery, config: Config):
     client, srv = await get_client(_uid(cq), config)
-    users = await _api_call(cq, client.get_users)
-    if users is None:
-        return
+    members = config.get_group_members(srv)
+    if config.is_cluster(srv):
+        users = await cluster_users_with_nodes(members)
+    else:
+        users = await _api_call(cq, client.get_users)
+        if users is None:
+            return
 
     now = datetime.now(timezone.utc)
     soon = now + timedelta(days=7)
@@ -440,7 +547,7 @@ async def cb_users_expiring(cq: CallbackQuery, config: Config):
         except Exception:
             pass
 
-    lines = [f"<b>⏰ Сроки действия — {srv.name}</b>", ""]
+    lines = [f"<b>⏰ Сроки действия — {srv.group if srv.group else srv.name}</b>", ""]
     lines.append(f"🔴 <b>Истёкших: {len(expired)}</b>")
     for name, dt in expired:
         lines.append(f"  <code>{name}</code> — {dt.strftime('%Y-%m-%d')}")
@@ -486,20 +593,28 @@ def _parse_exp(exp: str):
 
 @router.callback_query(F.data == "users:delete_expired")
 async def cb_delete_expired(cq: CallbackQuery, config: Config):
-    client, _ = await get_client(_uid(cq), config)
+    client, srv = await get_client(_uid(cq), config)
+    members = config.get_group_members(srv)
+
+    # Читаем список с любого узла
     users = await _api_call(cq, client.get_users)
     if users is None:
         return
+
     now = datetime.now(timezone.utc)
+    expired = [
+        u["username"] for u in users
+        if (exp := _parse_exp(u.get("expiration_rfc3339", ""))) and exp < now
+    ]
+
     deleted = errors = 0
-    for u in users:
-        exp_dt = _parse_exp(u.get("expiration_rfc3339", ""))
-        if exp_dt and exp_dt < now:
-            try:
-                await client.delete_user(u["username"])
-                deleted += 1
-            except Exception:
-                errors += 1
+    for username in expired:
+        results = await cluster_write(members, "delete_user", username)
+        if _all_ok(results):
+            deleted += 1
+        else:
+            errors += 1
+
     await cq.answer(f"✅ Удалено: {deleted}, ошибок: {errors}")
     await _show_users(cq, config, 0)
 
@@ -509,10 +624,39 @@ async def cb_delete_expired(cq: CallbackQuery, config: Config):
 @router.callback_query(F.data.startswith("user:view:"))
 async def cb_user_view(cq: CallbackQuery, config: Config):
     username = cq.data.split(":", 2)[2]
-    client, _ = await get_client(_uid(cq), config)
-    user = await _api_call(cq, client.get_user, username)
-    if user is None:
-        return
+    client, srv = await get_client(_uid(cq), config)
+    members = config.get_group_members(srv)
+
+    if config.is_cluster(srv):
+        # Читаем данные по каждому узлу параллельно
+        async def _get_from_node(node_srv):
+            nc = TelemetClient(node_srv.url, node_srv.auth_header)
+            try:
+                return node_srv.name, await nc.get_user(username)
+            except Exception:
+                return node_srv.name, None
+
+        results = await asyncio.gather(*[_get_from_node(m) for m in members])
+        user = None
+        nodes = {}
+        for node_name, node_user in results:
+            if node_user:
+                if user is None:
+                    user = dict(node_user)
+                nodes[node_name] = node_user.get("current_connections", 0)
+
+        if user is None:
+            await cq.answer("❌ Пользователь не найден", show_alert=True)
+            return
+
+        # Суммируем соединения и добавляем _nodes
+        user["current_connections"] = sum(nodes.values())
+        user["_nodes"] = nodes
+    else:
+        user = await _api_call(cq, client.get_user, username)
+        if user is None:
+            return
+
     text = format_user_detail(user)
     kb = user_detail_kb(username)
     if cq.message.photo:
@@ -532,13 +676,20 @@ async def cb_user_view(cq: CallbackQuery, config: Config):
 async def cb_rotate_secret(cq: CallbackQuery, config: Config):
     username = cq.data.split(":", 2)[2]
     new_secret = _gen_secret()
-    client, _ = await get_client(_uid(cq), config)
-    user = await _api_call(cq, client.patch_user, username, {"secret": new_secret})
-    if user is None:
+    client, srv = await get_client(_uid(cq), config)
+    members = config.get_group_members(srv)
+    results = await cluster_write(members, "patch_user", username, {"secret": new_secret})
+    ok_results = [r for r in results if r.ok]
+    if not ok_results:
+        await cq.answer("❌ Не удалось обновить секрет", show_alert=True)
         return
+    user = ok_results[0].data
+    status = ""
+    if not _all_ok(results):
+        status = "\n⚠️ " + _format_cluster_result([r for r in results if not r.ok])
     await cq.answer("✅ Секрет обновлён")
     await cq.message.answer(
-        f"🔑 <b>Новый секрет — {username}</b>\n\n"
+        f"🔑 <b>Новый секрет — {username}</b>{status}\n\n"
         f"<code>{new_secret}</code>\n\n"
         f"<i>Сохраните — больше не будет показан</i>",
     )
@@ -842,11 +993,16 @@ async def cb_user_delete_confirm(cq: CallbackQuery):
 @router.callback_query(F.data.startswith("user:delete:"))
 async def cb_user_delete(cq: CallbackQuery, config: Config):
     username = cq.data.split(":", 2)[2]
-    client, _ = await get_client(_uid(cq), config)
-    result = await _api_call(cq, client.delete_user, username)
-    if result is None:
-        return
-    await cq.answer(f"✅ {username} удалён")
+    _, srv = await get_client(_uid(cq), config)
+    members = config.get_group_members(srv)
+
+    results = await cluster_write(members, "delete_user", username)
+
+    if _all_ok(results):
+        await cq.answer(f"✅ {username} удалён")
+    else:
+        status = _format_cluster_result(results)
+        await cq.answer(f"⚠️ Частичное удаление:\n{status}"[:200], show_alert=True)
     await _show_users(cq, config, 0)
 
 
@@ -874,15 +1030,24 @@ async def cmd_adduser(message: Message, config: Config):
         payload["expiration_rfc3339"] = exp
 
     client, srv = await get_client(_uid(message), config)
-    try:
-        result = await client.create_user(payload)
-    except ApiError as e:
-        await message.answer(f"❌ <b>{e.code}</b>: {e.message}")
+    members = config.get_group_members(srv)
+    results = await cluster_write(members, "create_user", payload)
+    ok_results = [r for r in results if r.ok]
+
+    if not ok_results:
+        errors = _format_cluster_result(results)
+        await message.answer(f"❌ Не удалось создать пользователя:\n{errors}")
         return
 
+    result = ok_results[0].data
     user = result.get("user", result)
     all_links = _get_all_links(user)
-    msg = (f"✅ <b>{username}</b> создан на <b>{srv.name}</b>\n\n"
+    status = ""
+    if len(members) > 1:
+        status = "\n" + _format_cluster_result(results)
+    elif not _all_ok(results):
+        status = "\n⚠️ " + _format_cluster_result([r for r in results if not r.ok])
+    msg = (f"✅ <b>{username}</b> создан{status}\n\n"
            f"🔑 Секрет: <code>{secret}</code>\n")
     if days:
         msg += f"📅 Срок: {days} дней\n"
@@ -928,16 +1093,21 @@ async def _do_search(message: Message, query: str, config: Config):
         await message.answer("❌ Пустой запрос")
         return
     client, srv = await get_client(_uid(message), config)
-    users = await _api_call(message, client.get_users)
-    if users is None:
-        return
+    members = config.get_group_members(srv)
+
+    if config.is_cluster(srv):
+        users = await cluster_users_with_nodes(members)
+    else:
+        users = await _api_call(message, client.get_users)
+        if users is None:
+            return
+
     q = query.lower()
     found = [u for u in users if q in u["username"].lower()]
     if not found:
         await message.answer(f"🔍 По запросу <b>{query}</b> ничего не найдено")
         return
     if len(found) == 1:
-        # Сразу показываем карточку
         u = found[0]
         await message.answer(
             format_user_detail(u),
@@ -995,8 +1165,11 @@ async def fsm_create_username(message: Message, state: FSMContext):
     await message.answer("Шаг 2/6: Секрет\n<i>32 hex-символа, /skip или /gen</i>")
 
 
-@router.message(CreateUserFSM.secret, F.text.regexp(r"^[^/]"))
+@router.message(CreateUserFSM.secret)
 async def fsm_create_secret(message: Message, state: FSMContext):
+    if _is_command(message):
+        await state.clear()
+        return
     txt = message.text.strip()
     if txt == "/gen":
         txt = _gen_secret()
@@ -1013,8 +1186,11 @@ async def fsm_create_secret(message: Message, state: FSMContext):
     await message.answer("Шаг 3/6: Max TCP\n<i>Число или /skip</i>")
 
 
-@router.message(CreateUserFSM.max_tcp, F.text.regexp(r"^[^/]"))
+@router.message(CreateUserFSM.max_tcp)
 async def fsm_create_max_tcp(message: Message, state: FSMContext):
+    if _is_command(message):
+        await state.clear()
+        return
     txt = message.text.strip()
     if txt != "/skip" and not txt.isdigit():
         await message.answer("❌ Число или /skip")
@@ -1028,8 +1204,11 @@ async def fsm_create_max_tcp(message: Message, state: FSMContext):
     await message.answer("Шаг 4/6: Срок действия\n<i>Число дней (30/90/365), дата 2026-12-31T23:59:59Z, или /skip</i>")
 
 
-@router.message(CreateUserFSM.expiration, F.text.regexp(r"^[^/]"))
+@router.message(CreateUserFSM.expiration)
 async def fsm_create_expiration(message: Message, state: FSMContext):
+    if _is_command(message):
+        await state.clear()
+        return
     txt = message.text.strip()
     if txt != "/skip":
         if txt.isdigit():
@@ -1047,8 +1226,11 @@ async def fsm_create_expiration(message: Message, state: FSMContext):
     await message.answer("Шаг 5/6: Квота трафика\n<i>Байты (10737418240 = 10GB) или /skip</i>")
 
 
-@router.message(CreateUserFSM.quota, F.text.regexp(r"^[^/]"))
+@router.message(CreateUserFSM.quota)
 async def fsm_create_quota(message: Message, state: FSMContext):
+    if _is_command(message):
+        await state.clear()
+        return
     txt = message.text.strip()
     if txt != "/skip" and not txt.isdigit():
         await message.answer("❌ Число байт или /skip")
@@ -1062,8 +1244,11 @@ async def fsm_create_quota(message: Message, state: FSMContext):
     await message.answer("Шаг 6/6: Max уникальных IP\n<i>Число или /skip</i>")
 
 
-@router.message(CreateUserFSM.max_ips, F.text.regexp(r"^[^/]"))
+@router.message(CreateUserFSM.max_ips)
 async def fsm_create_max_ips(message: Message, state: FSMContext):
+    if _is_command(message):
+        await state.clear()
+        return
     txt = message.text.strip()
     if txt != "/skip" and not txt.isdigit():
         await message.answer("❌ Число или /skip")
@@ -1083,8 +1268,11 @@ async def fsm_create_max_ips(message: Message, state: FSMContext):
     await message.answer("\n".join(lines))
 
 
-@router.message(CreateUserFSM.confirm, F.text.regexp(r"^[^/]"))
+@router.message(CreateUserFSM.confirm)
 async def fsm_create_confirm(message: Message, state: FSMContext, config: Config):
+    if _is_command(message):
+        await state.clear()
+        return
     if message.text.strip().lower() not in ("да", "yes", "y", "д"):
         await state.clear()
         await message.answer("❌ Отменено. /menu")
@@ -1095,16 +1283,30 @@ async def fsm_create_confirm(message: Message, state: FSMContext, config: Config
     if "secret" not in pl:
         pl["secret"] = _gen_secret()
     await state.clear()
-    client, _ = await get_client(_uid(message), config)
-    try:
-        result = await client.create_user(pl)
-    except ApiError as e:
-        await message.answer(f"❌ <b>{e.code}</b>: {e.message}")
+    client, srv = await get_client(_uid(message), config)
+    members = config.get_group_members(srv)
+
+    results = await cluster_write(members, "create_user", pl)
+    ok_results = [r for r in results if r.ok]
+    fail_results = [r for r in results if not r.ok]
+
+    if not ok_results:
+        errors = _format_cluster_result(results)
+        await message.answer(f"❌ Не удалось создать пользователя:\n{errors}")
         return
+
+    # Берём данные из первого успешного узла
+    result = ok_results[0].data
     user = result.get("user", result)
     secret = result.get("secret", pl.get("secret", "—"))
+
+    status_text = "\n\n<b>Статус по узлам:</b>\n" + _format_cluster_result(results) if len(members) > 1 else ""
+    if fail_results:
+        status_text += "\n\n⚠️ <b>Не синхронизировано:</b>\n" + _format_cluster_result(fail_results)
+
     await message.answer(
-        f"✅ <b>{pl['username']}</b> создан!\n\n🔑 Секрет: <code>{secret}</code>\n\n"
+        f"✅ <b>{pl['username']}</b> создан!{status_text}\n\n"
+        f"🔑 Секрет: <code>{secret}</code>\n\n"
         + format_user_detail(user),
         reply_markup=user_detail_kb(pl["username"]),
     )
@@ -1160,15 +1362,25 @@ async def fsm_edit_value(message: Message, state: FSMContext, config: Config):
     elif field == "expiration_rfc3339" and txt.isdigit():
         value = (datetime.now(timezone.utc) + timedelta(days=int(txt))).strftime("%Y-%m-%dT%H:%M:%SZ")
 
-    client, _ = await get_client(_uid(message), config)
-    try:
-        user = await client.patch_user(username, {field: value})
-    except ApiError as e:
-        await message.answer(f"❌ <b>{e.code}</b>: {e.message}")
+    client, srv = await get_client(_uid(message), config)
+    members = config.get_group_members(srv)
+    results = await cluster_write(members, "patch_user", username, {field: value})
+
+    ok_results = [r for r in results if r.ok]
+    if not ok_results:
+        errors = _format_cluster_result(results)
+        await message.answer(f"❌ Не удалось обновить:\n{errors}")
         return
+
+    user = ok_results[0].data
     label = FIELD_LABELS.get(field, (field,))[0]
-    await message.answer(f"✅ {label} обновлён\n\n" + format_user_detail(user),
-                         reply_markup=user_detail_kb(username))
+    status = ""
+    if not _all_ok(results):
+        status = "\n⚠️ " + _format_cluster_result([r for r in results if not r.ok])
+    await message.answer(
+        f"✅ {label} обновлён{status}\n\n" + format_user_detail(user),
+        reply_markup=user_detail_kb(username),
+    )
 
 
 # ─── Runtime ──────────────────────────────────────────────────────────────────
@@ -1180,50 +1392,32 @@ async def cb_runtime_menu(cq: CallbackQuery):
 
 @router.callback_query(F.data == "runtime:gates")
 async def cb_runtime_gates(cq: CallbackQuery, config: Config):
-    client, _ = await get_client(_uid(cq), config)
-    data = await _api_call(cq, client.get_runtime_gates)
-    if data:
-        await _safe_edit(cq, format_runtime_gates(data), reply_markup=runtime_sub_kb("gates"))
+    await _cluster_section(cq, config, "get_runtime_gates", format_runtime_gates, runtime_sub_kb("gates"))
 
 
 @router.callback_query(F.data == "runtime:init")
 async def cb_runtime_init(cq: CallbackQuery, config: Config):
-    client, _ = await get_client(_uid(cq), config)
-    data = await _api_call(cq, client.get_runtime_initialization)
-    if data:
-        await _safe_edit(cq, format_runtime_init(data), reply_markup=runtime_sub_kb("init"))
+    await _cluster_section(cq, config, "get_runtime_initialization", format_runtime_init, runtime_sub_kb("init"))
 
 
 @router.callback_query(F.data == "runtime:me_quality")
 async def cb_runtime_me_quality(cq: CallbackQuery, config: Config):
-    client, _ = await get_client(_uid(cq), config)
-    data = await _api_call(cq, client.get_runtime_me_quality)
-    if data:
-        await _safe_edit(cq, format_me_quality(data), reply_markup=runtime_sub_kb("me_quality"))
+    await _cluster_section(cq, config, "get_runtime_me_quality", format_me_quality, runtime_sub_kb("me_quality"))
 
 
 @router.callback_query(F.data == "runtime:upstream_quality")
 async def cb_runtime_upstream_quality(cq: CallbackQuery, config: Config):
-    client, _ = await get_client(_uid(cq), config)
-    data = await _api_call(cq, client.get_runtime_upstream_quality)
-    if data:
-        await _safe_edit(cq, format_upstream_quality(data), reply_markup=runtime_sub_kb("upstream_quality"))
+    await _cluster_section(cq, config, "get_runtime_upstream_quality", format_upstream_quality, runtime_sub_kb("upstream_quality"))
 
 
 @router.callback_query(F.data == "runtime:events")
 async def cb_runtime_events(cq: CallbackQuery, config: Config):
-    client, _ = await get_client(_uid(cq), config)
-    data = await _api_call(cq, client.get_runtime_events, 20)
-    if data:
-        await _safe_edit(cq, format_runtime_events(data), reply_markup=runtime_sub_kb("events"))
+    await _cluster_section(cq, config, "get_runtime_events", format_runtime_events, runtime_sub_kb("events"), 20)
 
 
 @router.callback_query(F.data == "runtime:connections")
 async def cb_runtime_connections(cq: CallbackQuery, config: Config):
-    client, _ = await get_client(_uid(cq), config)
-    data = await _api_call(cq, client.get_runtime_connections)
-    if data:
-        await _safe_edit(cq, format_connections(data), reply_markup=runtime_sub_kb("connections"))
+    await _cluster_section(cq, config, "get_runtime_connections", format_connections, runtime_sub_kb("connections"))
 
 
 # ─── Security ─────────────────────────────────────────────────────────────────
@@ -1235,36 +1429,24 @@ async def cb_security_menu(cq: CallbackQuery):
 
 @router.callback_query(F.data == "security:posture")
 async def cb_security_posture(cq: CallbackQuery, config: Config):
-    client, _ = await get_client(_uid(cq), config)
-    data = await _api_call(cq, client.get_security_posture)
-    if data:
-        await _safe_edit(cq, format_security_posture(data), reply_markup=security_sub_kb("posture"))
+    await _cluster_section(cq, config, "get_security_posture", format_security_posture, security_sub_kb("posture"))
 
 
 @router.callback_query(F.data == "security:whitelist")
 async def cb_security_whitelist(cq: CallbackQuery, config: Config):
-    client, _ = await get_client(_uid(cq), config)
-    data = await _api_call(cq, client.get_security_whitelist)
-    if data:
-        await _safe_edit(cq, format_security_whitelist(data), reply_markup=security_sub_kb("whitelist"))
+    await _cluster_section(cq, config, "get_security_whitelist", format_security_whitelist, security_sub_kb("whitelist"))
 
 
 @router.callback_query(F.data == "security:limits")
 async def cb_security_limits(cq: CallbackQuery, config: Config):
-    client, _ = await get_client(_uid(cq), config)
-    data = await _api_call(cq, client.get_limits_effective)
-    if data:
-        await _safe_edit(cq, format_limits(data), reply_markup=security_sub_kb("limits"))
+    await _cluster_section(cq, config, "get_limits_effective", format_limits, security_sub_kb("limits"))
 
 
 # ─── Upstreams ────────────────────────────────────────────────────────────────
 
 @router.callback_query(F.data.in_({"menu:upstreams", "upstreams:refresh"}))
 async def cb_upstreams(cq: CallbackQuery, config: Config):
-    client, _ = await get_client(_uid(cq), config)
-    data = await _api_call(cq, client.get_stats_upstreams)
-    if data:
-        await _safe_edit(cq, format_upstreams(data), reply_markup=upstreams_kb())
+    await _cluster_section(cq, config, "get_stats_upstreams", format_upstreams, upstreams_kb())
 
 
 # ─── DCs ──────────────────────────────────────────────────────────────────────
@@ -1276,18 +1458,90 @@ async def cb_dcs_menu(cq: CallbackQuery):
 
 @router.callback_query(F.data == "dcs:status")
 async def cb_dcs_status(cq: CallbackQuery, config: Config):
-    client, _ = await get_client(_uid(cq), config)
-    data = await _api_call(cq, client.get_stats_dcs)
-    if data:
-        await _safe_edit(cq, format_dcs(data), reply_markup=dcs_sub_kb("status"))
+    await _cluster_section(cq, config, "get_stats_dcs", format_dcs, dcs_sub_kb("status"))
 
 
 @router.callback_query(F.data == "dcs:writers")
 async def cb_dcs_writers(cq: CallbackQuery, config: Config):
-    client, _ = await get_client(_uid(cq), config)
-    data = await _api_call(cq, client.get_stats_me_writers)
-    if data:
-        await _safe_edit(cq, format_me_writers(data), reply_markup=dcs_sub_kb("writers"))
+    await _cluster_section(cq, config, "get_stats_me_writers", format_me_writers, dcs_sub_kb("writers"))
+
+
+# ─── Proxy checker ────────────────────────────────────────────────────────────
+
+def _proxy_prompt_kb() -> InlineKeyboardMarkup:
+    """Клавиатура только с кнопкой Меню — пока ждём ссылку."""
+    from aiogram.utils.keyboard import InlineKeyboardBuilder as _IKB
+    kb = _IKB()
+    kb.button(text="◀️ Меню", callback_data="menu:main")
+    kb.adjust(1)
+    return kb.as_markup()
+
+
+@router.callback_query(F.data == "menu:proxy_check")
+async def cb_proxy_check_menu(cq: CallbackQuery, state: FSMContext):
+    await state.set_state(ProxyCheckFSM.waiting_url)
+    await cq.answer()
+    await cq.message.answer(
+        "🔍 <b>Проверка MTProto прокси</b>\n\n"
+        "Отправь ссылку на прокси в формате:\n"
+        "<code>tg://proxy?server=HOST&port=443&secret=SECRET</code>\n\n"
+        "или нажми кнопку «Подключиться» в любом канале — "
+        "скопируй ссылку и отправь сюда.",
+        reply_markup=_proxy_prompt_kb(),
+    )
+
+
+@router.callback_query(F.data == "proxy:check_again")
+async def cb_proxy_check_again(cq: CallbackQuery, state: FSMContext):
+    await state.set_state(ProxyCheckFSM.waiting_url)
+    await cq.answer()
+    await cq.message.answer(
+        "🔍 Отправь ссылку на прокси:",
+        reply_markup=_proxy_prompt_kb(),
+    )
+
+
+@router.message(ProxyCheckFSM.waiting_url, F.text.regexp(r"^[^/]"))
+async def fsm_proxy_check_url(message: Message, state: FSMContext, config: Config):
+    await state.clear()
+    url = message.text.strip()
+
+    if not (url.startswith("tg://") or "t.me/proxy" in url):
+        await state.set_state(ProxyCheckFSM.waiting_url)
+        await message.answer(
+            "❌ Не удалось распознать ссылку.\n\n"
+            "Ожидается формат:\n"
+            "<code>tg://proxy?server=HOST&port=443&secret=SECRET</code>",
+            reply_markup=_proxy_prompt_kb(),
+        )
+        return
+
+    info = pc.parse_proxy_url(url)
+    if info is None:
+        await state.set_state(ProxyCheckFSM.waiting_url)
+        await message.answer(
+            "❌ Не удалось разобрать ссылку — проверь формат.",
+            reply_markup=_proxy_prompt_kb(),
+        )
+        return
+
+    wait_msg = await message.answer("⏳ Проверяю прокси...")
+    info = await pc.check_proxy(
+        info,
+        timeout=5.0,
+        agents=config.agents if config.agents else None,
+    )
+
+    try:
+        await wait_msg.delete()
+    except Exception:
+        pass
+
+    # Только после результата показываем кнопки «Проверить ещё» и «Меню»
+    await message.answer(
+        pc.format_proxy_result(info),
+        reply_markup=proxy_check_kb(has_result=True),
+    )
 
 
 # ─── Alerts / Help ────────────────────────────────────────────────────────────

@@ -10,43 +10,46 @@ Telegram-бот для управления [Telemt MTProxy](https://github.com/
 ⚡ Runtime              ⚠️ Истекающие
 🔒 Безопасность         🔗 Upstreams
 📡 DC / Writers         📤 Бэкап
-✅ Server 1               Server 2       ← переключатель серверов
+🔍 Проверить прокси
+✅ cluster_ha           BS    ← переключатель серверов/кластеров
 ```
 
 ## Возможности
 
 | Раздел | Функции |
 |--------|---------|
-| 🟢 Состояние сервера | Dashboard: статус, uptime, версия, соединения, bad-классы, handshake-ошибки, время обновления |
-| 📊 Отчёт по трафику | Все клиенты за 1/7/30 дней, сортировка по потреблению, пометка истёкших, 📈 график топ-15 |
-| 👥 Клиенты | Список с пагинацией, 🔍 поиск по имени, трафик и соединения на кнопке |
-| 🗒 Карточка клиента | Просмотр, редактирование полей, смена секрета, 📊 история трафика с 📈 графиком (24ч/7/14/30д), QR-коды |
-| ➕ Новый клиент | FSM-мастер (6 шагов) или быстрая команда `/adduser имя [дней]` |
-| ⚠️ Истекающие | Список клиентов с истекающим сроком + массовое удаление истёкших |
+| 🟢 Состояние сервера | Dashboard: статус, uptime, версия, соединения, bad-классы, handshake-ошибки |
+| 📊 Отчёт по трафику | Все клиенты за 1/7/30 дней, сортировка, пометка истёкших, 📈 график топ-15 |
+| 👥 Клиенты | Список с пагинацией, 🔍 поиск, трафик, соединения, IP-шаринг индикатор |
+| 🗒 Карточка клиента | Просмотр, редактирование, смена секрета, история трафика с 📈 графиком, QR-коды |
+| ➕ Новый клиент | FSM-мастер (6 шагов) или `/adduser имя [дней]` |
+| ⚠️ Истекающие | Список + массовое удаление истёкших |
 | 📤 Бэкап | Выгрузка `telemt.toml` файлом в чат |
 | ⚡ Runtime | Gates, Init, ME Quality, Upstream Quality, Events, Connections |
 | 🔒 Безопасность | Posture, IP Whitelist, Effective Limits |
 | 📡 DC / Writers | DC Status, ME Writers по датацентрам |
 | 🔗 Upstreams | Список апстримов с RTT и статусом |
-| 🔔 Алерты | 9 типов + алерт квоты. Настройка через `/alerts`, история через `/alert_log` |
-| 🖥 Мультисервер | Переключение между инстансами из главного меню, выбор сохраняется между перезапусками |
+| 🔔 Алерты | 10 типов, настройка через `/alerts`, история через `/alert_log` |
+| 🖥 Мультисервер | Переключение между серверами и кластерами из главного меню |
+| ⚙️ Кластер HA | Write-операции на все узлы параллельно, чтение с первого доступного |
+| 🔍 Проверка прокси | MTProto ссылки: SNI, тип секрета, TCP + TLS с нескольких точек |
 
 ## Команды
 
 | Команда | Описание |
 |---------|----------|
 | `/menu` | Главное меню |
-| `/help` | Справка по боту |
-| `/adduser имя [дней]` | Быстро создать клиента, пример: `/adduser vasya 30` |
-| `/find запрос` | Поиск клиента по имени, пример: `/find vas` |
-| `/alerts` | Включить / выключить алерты |
+| `/help` | Справка |
+| `/adduser имя [дней]` | Быстро создать клиента |
+| `/find запрос` | Поиск клиента по имени |
+| `/alerts` | Настройки алертов |
 | `/alert_log` | История последних 20 алертов |
 | `/id` | Ваш Telegram ID |
 
 ## Требования
 
 - Python 3.11+
-- Telemt MTProxy с включённым Control API (`api_addr = "127.0.0.1:9091"`)
+- Telemt MTProxy с включённым Control API (`api_addr = "IP:9091"`)
 - `matplotlib` — для графиков трафика (опционально, бот работает и без него)
 - uv
 
@@ -72,14 +75,13 @@ uv run bot.py
 python bot.py
 ```
 
-
 ## Установка через systemd
 
 > ⚠️ **Замени `/root/telemt_bot` на реальный путь к боту на своём сервере.**
 
 ```ini
 # /etc/systemd/system/telemt-bot.service
-[[Unit]
+[Unit]
 Description=Telemt Manager Bot
 After=network.target
 
@@ -104,96 +106,183 @@ journalctl -u telemt-bot -f
 
 ## Переменные окружения
 
+### Основные
+
 | Переменная | Описание | Пример |
 |-----------|----------|--------|
-| `BOT_TOKEN` | Токен бота от @BotFather | `1234:AABBcc...` |
+| `BOT_TOKEN` | Токен от @BotFather | `1234:AABBcc...` |
 | `ALLOWED_USERS` | Telegram user_id через запятую | `123456,789012` |
-| `SERVER_URL` | URL Control API telemt | `http://IP:9091` |
-| `SERVER_NAME` | Имя сервера в меню | `My Telemt` |
-| `SERVER_AUTH` | Authorization header (если задан) | `secret-token` |
-| `TZ` | Часовой пояс для отображения времени | `Europe/Moscow` |
+| `TZ` | Часовой пояс | `Europe/Moscow` |
+| `LITE_MODE` | Минимальный режим (без алертов/графиков) | `false` |
+
+### Один сервер
+
+```env
+SERVER_URL=http://IP:9091
+SERVER_NAME=My Telemt
+SERVER_AUTH=secret
+```
 
 ### Несколько серверов
 
 ```env
 SERVER_1_URL=http://IP:9091
-SERVER_1_NAME= Server 1
-SERVER_1_AUTH=secret1
+SERVER_1_NAME=Main
+SERVER_1_AUTH=
 
 SERVER_2_URL=http://IP:9091
-SERVER_2_NAME= Server 2
-SERVER_2_AUTH=secret2
+SERVER_2_NAME=Backup
+SERVER_2_AUTH=
 ```
 
-### Пороги алертов (опционально)
+### Кластер HA
+
+Серверы с одинаковым `SERVER_N_GROUP` объединяются в кластер.
+Write-операции (создание/удаление/редактирование) выполняются параллельно на всех узлах.
+В меню кластер отображается как одна кнопка `⚙️` с именем группы.
 
 ```env
-ALERT_CONN_SPIKE_PCT=50       # всплеск соединений, %
-ALERT_CONN_SPIKE_MIN_BASE=100 # мин. база соединений для срабатывания
-ALERT_WRITERS_LOW_PCT=80      # порог coverage ME Writers, %
-ALERT_HS_TIMEOUT_SPIKE=50     # handshake timeout, +N за 2 мин
-ALERT_BAD_CLIENT_SPIKE=100    # плохих TLS клиентов, +N за 2 мин
-ALERT_QUOTA_PCT=80            # алерт при использовании N% квоты клиента
+SERVER_1_URL=http://IP:9091
+SERVER_1_NAME=HA_A
+SERVER_1_AUTH=
+SERVER_1_GROUP=cluster_ha
+
+SERVER_2_URL=http://IP:9092
+SERVER_2_NAME=HA_B
+SERVER_2_AUTH=
+SERVER_2_GROUP=cluster_ha
+
+SERVER_3_URL=http://IP:9091
+SERVER_3_NAME=Backup
+SERVER_3_AUTH=
+# SERVER_3_GROUP не задан — одиночный сервер
+```
+
+### Lite режим
+
+```env
+LITE_MODE=true
+```
+
+Отключает: алерты, scheduler, графики, отчёт по трафику, истекающие,
+безопасность, upstreams, DC/Writers, проверку прокси.
+
+Оставляет: состояние сервера, клиенты, создание клиентов, runtime, бэкап.
+
+### Агенты проверки прокси
+
+Агент (`proxy_agent.py`) запускается на дополнительных серверах для проверки
+доступности прокси с разных точек (RU, EU и т.д.).
+
+```env
+AGENT_1_URL=http://IP:8765
+AGENT_1_NAME=RU
+AGENT_1_TOKEN=secret-token
+AGENT_1_FLAG=🇷🇺
+
+AGENT_2_URL=http://IP:8765
+AGENT_2_NAME=Asia
+AGENT_2_TOKEN=secret-token
+# AGENT_2_FLAG не задан — определится по GeoIP автоматически
+```
+
+### Пороги алертов
+
+```env
+ALERT_CONN_SPIKE_PCT=50
+ALERT_CONN_SPIKE_MIN_BASE=100
+ALERT_WRITERS_LOW_PCT=80
+ALERT_HS_TIMEOUT_SPIKE=50
+ALERT_BAD_CLIENT_SPIKE=100
+ALERT_QUOTA_PCT=80
 ```
 
 ### Логирование
 
 ```env
-LOG_LEVEL=INFO          # DEBUG / INFO / WARNING / ERROR
-LOG_FILE=telemt_bot.log # путь к файлу (пусто = только stdout)
-LOG_MAX_MB=10           # макс. размер файла до ротации
-LOG_BACKUPS=3           # кол-во резервных файлов
-NO_COLOR=1              # отключить цвета (для non-tty окружений)
+LOG_LEVEL=INFO
+LOG_FILE=telemt_bot.log
+LOG_MAX_MB=10
+LOG_BACKUPS=3
+NO_COLOR=1
 ```
 
 ## Алерты
 
-Настраиваются командой `/alerts`. Каждый тип включается/выключается отдельно:
-
 | Тип | Описание | Cooldown |
 |-----|----------|----------|
-| `status_down` | Сервер стал недоступен | 5 мин |
-| `status_up` | Сервер восстановился | — |
+| `status_down` | Сервер недоступен | 5 мин |
+| `status_up` | Восстановился | — |
 | `conn_spike` | Всплеск соединений >50% | 2 мин |
-| `writers_low` | ME Writers coverage <80% | 2 мин |
-| `version_change` | Обновилась версия telemt | — |
-| `bad_unknown_sni` | Неизвестный TLS SNI (любой рост) | 5 мин |
+| `writers_low` | ME Writers <80% | 2 мин |
+| `version_change` | Обновление версии | — |
+| `bad_unknown_sni` | Неизвестный SNI | 5 мин |
 | `hs_timeout_spike` | Handshake timeout +50 за 2 мин | 2 мин |
-| `bad_client_spike` | Плохих TLS клиентов +100 за 2 мин | 2 мин |
-| `hs_conn_reset` | Сброс при handshake (любой рост) | 5 мин |
+| `bad_client_spike` | Плохих TLS +100 за 2 мин | 2 мин |
+| `hs_conn_reset` | Сброс при handshake | 5 мин |
 | `quota_warn` | Клиент использовал ≥80% квоты | 1 час |
 
-История сработавших алертов — команда `/alert_log`.
+## Проверка MTProto прокси
 
-## Фоновые задачи
+Бот проверяет прокси-ссылки вида `tg://proxy?...` или `https://t.me/proxy?...`:
 
-| Задача | Интервал | Описание |
-|--------|----------|----------|
-| Проверка здоровья + алерты | 2 мин | `GET /health`, `/stats/summary`, все алерты |
-| Сбор трафика | 15 мин | Снимки трафика в SQLite для графиков и истории |
-| Очистка БД | 24 ч | Удаление данных старше 30 дней |
+- Тип секрета: FakeTLS / DD / Simple
+- SNI — домен под который маскируется прокси
+- TCP RTT + TLS handshake с каждой точки (EU, RU и др.)
+
+## Установка агента через systemd
+
+> ⚠️ **Замени `/root/proxy_agent.py` на реальный путь к агенту на своём сервере.**
+
+```bash
+python3 proxy_agent.py --host IP --port 8765 --token YOUR_TOKEN
+
+# systemd сервис
+cp proxy_agent.py /root/
+
+cat > /etc/systemd/system/proxy-agent.service << EOF
+ [Unit]
+ Description=Proxy Check Agent
+ After=network.target
+ [Service]
+ Type=simple
+ User=root
+ ExecStart=/usr/bin/python3 /root/proxy_agent.py --host 127.0.0.1 --port 8765 --token МОЙ_СЕКРЕТ  # ← путь к директории агента 
+ Restart=on-failure
+ RestartSec=5
+ [Install]
+ WantedBy=multi-user.target
+ EOF
+systemctl daemon-reload
+systemctl enable --now proxy-agent
+systemctl restart proxy-agent.service
+
+
+```
 
 ## Структура проекта
 
 ```
 telemt_bot/
-├── bot.py            # Точка входа, инициализация, команды Меню
-├── config.py         # Загрузка конфига из .env, пороги алертов
+├── bot.py            # Точка входа
+├── config.py         # Конфиг из .env (серверы, кластеры, агенты, lite режим)
 ├── handlers.py       # Все обработчики команд и callback
-├── keyboards.py      # Inline-клавиатуры (chart_mode и текстовый режим)
+├── keyboards.py      # Inline-клавиатуры
 ├── formatters.py     # Форматирование ответов API в HTML
-├── charts.py         # Графики трафика через matplotlib (тёмная тема)
-├── api_client.py     # HTTP-клиент для Telemt Control API (semaphore, timeout)
-├── database.py       # SQLite: трафик, алерты, статусы, сессии пользователей
-├── scheduler.py      # Фоновые задачи (APScheduler) с safe_job декоратором
-├── session.py        # Выбор активного сервера (хранится в БД)
-├── logging_setup.py  # Цветной logging с ротацией файла
-├── tz.py             # Работа с часовыми поясами через TZ из .env
-├── middlewares.py    # Авторизация по ALLOWED_USERS
-├── states.py         # FSM-состояния (Create, Edit, Search)
-├── sysinfo.py        # Системная информация (psutil)
-├── qr_utils.py       # Генерация QR-кодов
-├── export_toml.py    # Бэкап telemt.toml
+├── charts.py         # Графики трафика (matplotlib)
+├── api_client.py     # HTTP-клиент + кластерные операции
+├── database.py       # SQLite: трафик, алерты, сессии
+├── scheduler.py      # Фоновые задачи + алерты
+├── session.py        # Выбор сервера (хранится в БД)
+├── proxy_checker.py  # Проверка MTProto прокси
+├── proxy_agent.py    # Агент проверки (запускается на RU-сервере)
+├── logging_setup.py  # Цветной logging с ротацией
+├── tz.py             # Часовые пояса
+├── middlewares.py    # Авторизация
+├── states.py         # FSM-состояния
+├── sysinfo.py        # Системная информация
+├── qr_utils.py       # QR-коды
+├── export_toml.py    # Бэкап конфига
 ├── export_utils.py   # Экспорт CSV/Excel
 ├── requirements.txt
 └── .env.example
@@ -202,16 +291,18 @@ telemt_bot/
 ## Зависимости
 
 ```
-aiogram==3.27.0          # Telegram Bot API framework
-aiohttp==3.13.5          # HTTP-клиент для API telemt
-aiosqlite==0.22.1        # Асинхронный SQLite
-APScheduler==3.11.2      # Планировщик фоновых задач
-matplotlib==3.10.3       # Графики трафика
-qrcode[pil]==8.2         # Генерация QR-кодов
-Pillow==12.1.1           # Работа с изображениями
-openpyxl==3.1.5          # Экспорт в Excel
-psutil==7.2.2            # Системная информация
-python-dotenv==1.2.2     # Загрузка .env
+aiogram==3.27.0
+aiohttp==3.13.5
+aiosqlite==0.22.1
+APScheduler==3.11.2
+matplotlib==3.10.3      # графики (опционально)
+telethon==1.43.2        # проверка прокси (опционально)
+qrcode[pil]==8.2
+Pillow==12.1.1
+openpyxl==3.1.5
+psutil==7.2.2
+python-dotenv==1.2.2
+python-socks==2.7.1
 ```
 
 ## Лицензия

@@ -28,20 +28,24 @@ setup_logging()
 logger = logging.getLogger(__name__)
 
 
-async def setup_bot_menu(bot: Bot):
+async def setup_bot_menu(bot: Bot, config=None):
     """Устанавливает команды в кнопку Меню."""
+    lite = config.lite_mode if config else False
     commands = [
-        BotCommand(command="menu",      description="Главное меню"),
-        BotCommand(command="help",      description="Справка по боту"),
-        BotCommand(command="adduser",   description="Быстро создать клиента"),
-        BotCommand(command="find",      description="Поиск клиента по имени"),
-        BotCommand(command="alerts",    description="Настройки алертов"),
-        BotCommand(command="alert_log", description="История последних алертов"),
-        BotCommand(command="id",        description="Ваш Telegram ID"),
+        BotCommand(command="menu",    description="Главное меню"),
+        BotCommand(command="help",    description="Справка по боту"),
+        BotCommand(command="adduser", description="Быстро создать клиента"),
+        BotCommand(command="find",    description="Поиск клиента по имени"),
+        BotCommand(command="id",      description="Ваш Telegram ID"),
     ]
+    if not lite:
+        commands += [
+            BotCommand(command="alerts",    description="Настройки алертов"),
+            BotCommand(command="alert_log", description="История последних алертов"),
+        ]
     await bot.set_my_commands(commands, scope=BotCommandScopeDefault())
     await bot.set_chat_menu_button(menu_button=MenuButtonCommands())
-    logger.info("Меню бота установлено (%d команд)", len(commands))
+    logger.info("Меню бота установлено (%d команд)%s", len(commands), " [lite]" if lite else "")
 
 
 async def main():
@@ -61,8 +65,11 @@ async def main():
 
     dp.include_router(router)
 
-    await setup_bot_menu(bot)
-    sched.setup(bot, config)
+    await setup_bot_menu(bot, config)
+    if not config.lite_mode:
+        sched.setup(bot, config)
+    else:
+        logger.info("Lite mode — scheduler и алерты отключены")
 
     logger.info(
         "Бот запущен | серверов: %d | юзеров: %d",
