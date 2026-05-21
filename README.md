@@ -234,6 +234,8 @@ NO_COLOR=1
 
 > ⚠️ **Замени `/root/proxy_agent.py` на реальный путь к агенту на своём сервере.**
 
+```bash
+python3 proxy_agent.py --host IP --port 8765 --token YOUR_TOKEN
 
 # systemd сервис
 cp proxy_agent.py /root/
