@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from dataclasses import dataclass
 from typing import Any, Optional
 
 import aiohttp
@@ -145,3 +146,93 @@ class TelemetClient:
             return True
         except Exception:
             return False
+
+
+# ─── Кластерные операции ─────────────────────────────────────────────────────
+
+@dataclass
+class NodeResult:
+    """Результат операции на одном узле кластера."""
+    server_name: str
+    ok: bool
+    data: Any = None
+    error: str = ""
+
+
+async def cluster_read(servers: list, method_name: str, *args, **kwargs) -> Any:
+    """
+    Читает данные с первого доступного узла кластера.
+    servers: list[ServerConfig]
+    """
+    from config import ServerConfig as _SC
+    last_error = None
+    for srv in servers:
+        try:
+            client = TelemetClient(srv.url, srv.auth_header)
+            method = getattr(client, method_name)
+            return await method(*args, **kwargs)
+        except ApiError as e:
+            last_error = e
+            continue
+    raise last_error or ApiError("unreachable", "Все узлы кластера недоступны")
+
+
+async def cluster_write(
+    servers: list,
+    method_name: str,
+    *args,
+    **kwargs,
+) -> list[NodeResult]:
+    """
+    Выполняет write-операцию параллельно на всех узлах кластера.
+    Возвращает список NodeResult — успех/ошибка по каждому узлу.
+    servers: list[ServerConfig]
+    """
+    async def _call_one(srv) -> NodeResult:
+        try:
+            client = TelemetClient(srv.url, srv.auth_header)
+            method = getattr(client, method_name)
+            data = await method(*args, **kwargs)
+            return NodeResult(server_name=srv.name, ok=True, data=data)
+        except ApiError as e:
+            return NodeResult(server_name=srv.name, ok=False, error=f"{e.code}: {e.message}")
+        except Exception as e:
+            return NodeResult(server_name=srv.name, ok=False, error=str(e)[:100])
+
+    results = await asyncio.gather(*[_call_one(srv) for srv in servers])
+    return list(results)
+
+
+async def cluster_users_with_nodes(servers: list) -> list[dict]:
+    """
+    Получает список пользователей и добавляет информацию о том,
+    на каком узле кластера активны соединения.
+    Возвращает пользователей с полем '_nodes': {'HA_A': conns, 'HA_B': conns}
+    """
+    async def _get_users_from(srv) -> tuple[str, list]:
+        try:
+            client = TelemetClient(srv.url, srv.auth_header)
+            users = await client.get_users()
+            return srv.name, users
+        except Exception:
+            return srv.name, []
+
+    # Параллельно опрашиваем все узлы
+    results = await asyncio.gather(*[_get_users_from(srv) for srv in servers])
+
+    # Агрегируем — берём данные с первого ответившего как базу
+    users_by_name: dict[str, dict] = {}
+    for srv_name, users in results:
+        for u in users:
+            username = u["username"]
+            if username not in users_by_name:
+                users_by_name[username] = dict(u)
+                users_by_name[username]["_nodes"] = {}
+            conns = u.get("current_connections", 0)
+            users_by_name[username]["_nodes"][srv_name] = conns
+            # Суммируем соединения по всем узлам
+            users_by_name[username]["current_connections"] = sum(
+                users_by_name[username]["_nodes"].values()
+            )
+
+    return list(users_by_name.values())

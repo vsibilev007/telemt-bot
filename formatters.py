@@ -224,6 +224,7 @@ def format_user_detail(u: dict) -> str:
     active_ips = u.get("active_unique_ips", 0)
     recent_ips = u.get("recent_unique_ips", 0)
     ip_list = u.get("active_unique_ips_list", [])
+    nodes = u.get("_nodes", {})  # данные кластера
 
     links_data = u.get("links", {})
     all_links = links_data.get("classic", []) + links_data.get("secure", []) + links_data.get("tls", [])
@@ -232,6 +233,17 @@ def format_user_detail(u: dict) -> str:
         f"<b>{icon} {u['username']}</b>",
         "",
         f"🔌 Соединений: <b>{conns}</b>",
+    ]
+
+    # Для кластера показываем распределение по узлам
+    if nodes:
+        node_lines = []
+        for node_name, node_conns in nodes.items():
+            node_icon = "🟢" if node_conns > 0 else "⚫"
+            node_lines.append(f"  {node_icon} {node_name}: {node_conns}")
+        lines.append("\n".join(node_lines))
+
+    lines += [
         f"📊 Трафик: <b>{octets}</b>",
         f"🌐 IP: {active_ips} активных / {recent_ips} недавних",
     ]

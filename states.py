@@ -21,3 +21,7 @@ class QuickAddFSM(StatesGroup):
 
 class SearchUserFSM(StatesGroup):
     waiting_query = State()
+
+
+class ProxyCheckFSM(StatesGroup):
+    waiting_url = State()

@@ -22,8 +22,10 @@ def main_menu_kb(
     current: int = 0,
     online_count: int = 0,
     status: str = "unknown",
+    config=None,
 ) -> InlineKeyboardMarkup:
     kb = InlineKeyboardBuilder()
+    lite = config.lite_mode if config else False
 
     if status == "ok":
         status_btn = "🟢 Состояние сервера"
@@ -32,30 +34,49 @@ def main_menu_kb(
     else:
         status_btn = "🟡 Состояние сервера"
 
-    # Строка 1
-    kb.button(text=status_btn,              callback_data="menu:dashboard")
-    kb.button(text="📊 Отчёт по трафику",  callback_data="menu:traffic_report")
-    # Строка 2
-    kb.button(text="👥 Все клиенты",        callback_data="menu:users")
-    kb.button(text="➕ Новый клиент",        callback_data="user:create")
-    # Строка 3
-    kb.button(text="⚡ Runtime",            callback_data="menu:runtime")
-    kb.button(text="⚠️ Истекающие",         callback_data="users:expiring_menu")
-    # Строка 4
-    kb.button(text="🔒 Безопасность",       callback_data="menu:security")
-    kb.button(text="🔗 Upstreams",          callback_data="menu:upstreams")
-    # Строка 5
-    kb.button(text="📡 DC / Writers",       callback_data="menu:dcs")
-    kb.button(text="📤 Бэкап",              callback_data="users:export_toml")
-
-    # Переключатель серверов (строка 6+), если их больше одного
-    if len(servers) > 1:
-        for i, srv in enumerate(servers):
-            mark = "✅ " if i == current else ""
-            kb.button(text=f"{mark}{srv.name}", callback_data=f"server:select:{i}")
-        kb.adjust(2, 2, 2, 2, 2, len(servers))
+    if lite:
+        kb.button(text=status_btn,          callback_data="menu:dashboard")
+        kb.button(text="👥 Все клиенты",    callback_data="menu:users")
+        kb.button(text="➕ Новый клиент",    callback_data="user:create")
+        kb.button(text="⚡ Runtime",        callback_data="menu:runtime")
+        kb.button(text="📤 Бэкап",          callback_data="users:export_toml")
+        n_main = 5
+        schema_base = [1, 2, 2]
     else:
-        kb.adjust(2)
+        kb.button(text=status_btn,              callback_data="menu:dashboard")
+        kb.button(text="📊 Отчёт по трафику",  callback_data="menu:traffic_report")
+        kb.button(text="👥 Все клиенты",        callback_data="menu:users")
+        kb.button(text="➕ Новый клиент",        callback_data="user:create")
+        kb.button(text="⚡ Runtime",            callback_data="menu:runtime")
+        kb.button(text="⚠️ Истекающие",         callback_data="users:expiring_menu")
+        kb.button(text="🔒 Безопасность",       callback_data="menu:security")
+        kb.button(text="🔗 Upstreams",          callback_data="menu:upstreams")
+        kb.button(text="📡 DC / Writers",       callback_data="menu:dcs")
+        kb.button(text="📤 Бэкап",              callback_data="users:export_toml")
+        kb.button(text="🔍 Проверить прокси",   callback_data="menu:proxy_check")
+        n_main = 11
+        schema_base = [2, 2, 2, 2, 2, 1]
+
+    # Переключатель серверов
+    menu_servers = config.get_menu_servers() if config else servers
+    if len(menu_servers) > 1:
+        for i, srv in enumerate(menu_servers):
+            is_current = False
+            if config:
+                cur_srv = servers[current] if current < len(servers) else None
+                if cur_srv:
+                    if srv.group and cur_srv.group == srv.group:
+                        is_current = True
+                    elif not srv.group and srv.name == cur_srv.name:
+                        is_current = True
+            mark = "✅ " if is_current else ""
+            cluster_icon = "" if lite else ("⚙️ " if config and config.is_cluster(srv) else "")
+            display_name = srv.group if (config and config.is_cluster(srv)) else srv.name
+            real_idx = servers.index(srv) if srv in servers else i
+            kb.button(text=f"{mark}{cluster_icon}{display_name}", callback_data=f"server:select:{real_idx}")
+        kb.adjust(*schema_base, len(menu_servers))
+    else:
+        kb.adjust(*schema_base)
 
     return kb.as_markup()
 
@@ -78,7 +99,10 @@ def dashboard_kb() -> InlineKeyboardMarkup:
 
 # ─── Пользователи ─────────────────────────────────────────────────────────────
 
-def users_list_kb(users: list, page: int = 0, page_size: int = 10) -> InlineKeyboardMarkup:
+def users_list_kb(
+    users: list, page: int = 0, page_size: int = 10,
+    config=None, cluster: bool = False,
+) -> InlineKeyboardMarkup:
     kb = InlineKeyboardBuilder()
 
     start = page * page_size
@@ -90,8 +114,25 @@ def users_list_kb(users: list, page: int = 0, page_size: int = 10) -> InlineKeyb
         icon = "🟢" if conns > 0 else "⚪"
         name = u["username"]
         traffic = _fmt_bytes_short(u.get("total_octets", 0))
+        active_ips = u.get("active_unique_ips", 0)
+
+        # Иконка шаринга: 2 IP — предупреждение, 3+ — подозрительно
+        if active_ips >= 3:
+            ip_tag = f" {active_ips}IP⚠️"
+        elif active_ips == 2:
+            ip_tag = f" {active_ips}IP"
+        else:
+            ip_tag = ""
+
+        node_tag = ""
+        if cluster and conns > 0:
+            nodes = u.get("_nodes", {})
+            active_nodes = [n for n, c in nodes.items() if c > 0]
+            if active_nodes:
+                node_tag = f" [{','.join(active_nodes)}]"
+
         kb.button(
-            text=f"{icon} {name}  |  {traffic}  |  {conns}🔌",
+            text=f"{icon} {name}  |  {traffic}  |  {conns}🔌{ip_tag}{node_tag}",
             callback_data=f"user:view:{name}",
         )
 
@@ -319,6 +360,14 @@ def dcs_sub_kb(section: str) -> InlineKeyboardMarkup:
     kb.button(text="🔄 Обновить",     callback_data=f"dcs:{section}")
     kb.button(text="◀️ DC / Writers", callback_data="menu:dcs")
     kb.adjust(2)
+    return kb.as_markup()
+
+
+def proxy_check_kb(has_result: bool = False) -> InlineKeyboardMarkup:
+    kb = InlineKeyboardBuilder()
+    kb.button(text="🔍 Проверить ещё", callback_data="proxy:check_again")
+    kb.button(text="◀️ Меню",          callback_data="menu:main")
+    kb.adjust(1)
     return kb.as_markup()
 
 

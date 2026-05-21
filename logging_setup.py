@@ -131,6 +131,11 @@ def setup_logging() -> None:
         "aiogram.event":        logging.ERROR,
         "asyncio":              logging.WARNING,
         "PIL":                  logging.WARNING,
+        # Telethon — подавляем INFO/WARNING от MTProto подключений
+        "telethon":             logging.ERROR,
+        "telethon.network":     logging.ERROR,
+        "telethon.crypto":      logging.ERROR,
+        "telethon.client":      logging.ERROR,
     }
     for name, lvl in _quiet.items():
         logging.getLogger(name).setLevel(lvl)
