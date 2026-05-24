@@ -1,6 +1,6 @@
 # Telemt Manager Bot
 
-Удобный Telegram-бот для управления [Telemt MTProxy](https://github.com/telemt/telemt) через Control API v1.
+Удобный Telegram-бот для управления [Telemt MTProxy](https://github.com/telemt/telemt) через Control API
 
 Бот помогает следить за состоянием серверов, управлять клиентами, смотреть трафик, получать алерты и работать с кластерами — прямо из Telegram.
 
