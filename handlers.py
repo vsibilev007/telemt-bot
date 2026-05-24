@@ -27,7 +27,8 @@ from formatters import (
     format_me_quality, format_me_writers, format_runtime_events,
     format_runtime_gates, format_runtime_init, format_security_posture,
     format_security_whitelist, format_upstream_quality, format_upstreams,
-    format_user_detail, format_user_list, format_user_links, fmt_bytes,
+    format_user_detail, format_user_list, format_user_links, format_users_quota,
+    fmt_bytes,
 )
 from keyboards import (
     alerts_kb, dashboard_kb, dcs_kb, dcs_sub_kb, export_menu_kb,
@@ -480,6 +481,45 @@ async def cb_users_search(cq: CallbackQuery, state: FSMContext):
     await state.set_state(SearchUserFSM.waiting_query)
     await cq.answer()
     await cq.message.answer("🔍 Введите имя или часть имени клиента:")
+
+
+@router.callback_query(F.data == "users:quota")
+async def cb_users_quota(cq: CallbackQuery, config: Config):
+    """Показывает сводку использования квот (GET /v1/users/quota, 3.4.12+)"""
+    client, srv = await get_client(_uid(cq), config)
+    members = config.get_group_members(srv)
+
+    if config.is_cluster(srv):
+        await cq.answer()
+        async def _get_quota(node_srv):
+            nc = TelemetClient(node_srv.url, node_srv.auth_header)
+            try:
+                data = await nc.get_users_quota()
+                return node_srv.name, True, format_users_quota(data)
+            except ApiError as e:
+                if e.status == 404:
+                    return node_srv.name, False, "⚠️ Требуется Telemt 3.4.12+"
+                return node_srv.name, False, f"❌ {e.message}"
+
+        results = await asyncio.gather(*[_get_quota(m) for m in members])
+        sep = "─" * 28
+        lines = []
+        for name, ok, text in results:
+            lines += [f"<b>⚙️ {name}</b>", sep, text, ""]
+        from aiogram.utils.keyboard import InlineKeyboardBuilder as _IKB
+        kb = _IKB()
+        kb.button(text="◀️ Ещё", callback_data="users:extra")
+        await _safe_edit(cq, "\n".join(lines).rstrip(), reply_markup=kb.as_markup())
+    else:
+        data = await _api_call(cq, client.get_users_quota)
+        if data is None:
+            return
+        from aiogram.utils.keyboard import InlineKeyboardBuilder as _IKB
+        kb = _IKB()
+        kb.button(text="🔄 Обновить", callback_data="users:quota")
+        kb.button(text="◀️ Ещё",      callback_data="users:extra")
+        kb.adjust(2)
+        await _safe_edit(cq, format_users_quota(data), reply_markup=kb.as_markup())
 
 
 @router.callback_query(F.data == "users:extra")
@@ -1318,8 +1358,10 @@ FIELD_LABELS = {
     "secret": ("🔑 Секрет", "32 hex-символа"),
     "max_tcp_conns": ("🔗 Max TCP", "целое число"),
     "expiration_rfc3339": ("📅 Срок", "число дней или 2026-12-31T23:59:59Z"),
-    "data_quota_bytes": ("💾 Квота", "байты"),
+    "data_quota_bytes": ("💾 Квота", "байты, например 10737418240 для 10GB"),
     "max_unique_ips": ("🌐 Max IP", "целое число"),
+    "rate_limit_up_bps": ("⬆️ Лимит upload", "байт/с, например 1048576 для 1MB/s, 0 — снять"),
+    "rate_limit_down_bps": ("⬇️ Лимит download", "байт/с, например 2097152 для 2MB/s, 0 — снять"),
 }
 
 
@@ -1355,6 +1397,18 @@ async def fsm_edit_value(message: Message, state: FSMContext, config: Config):
             await message.answer("❌ Нужно целое число")
             return
         value = int(txt)
+    elif field in ("rate_limit_up_bps", "rate_limit_down_bps"):
+        # Принимаем: 0 (снять), целое число байт/с, или null
+        if txt.lower() in ("0", "нет", "null", "none", "—"):
+            value = None  # удаляем лимит
+        elif txt.isdigit():
+            value = int(txt)
+        else:
+            await message.answer(
+                "❌ Укажите скорость в байт/с (например <code>1048576</code> для 1 MB/s)\n"
+                "или <code>0</code> чтобы снять лимит"
+            )
+            return
     elif field == "secret":
         if not re.match(r"^[0-9a-fA-F]{32}$", txt):
             await message.answer("❌ Ровно 32 hex-символа")

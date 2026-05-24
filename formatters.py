@@ -224,7 +224,11 @@ def format_user_detail(u: dict) -> str:
     active_ips = u.get("active_unique_ips", 0)
     recent_ips = u.get("recent_unique_ips", 0)
     ip_list = u.get("active_unique_ips_list", [])
-    nodes = u.get("_nodes", {})  # данные кластера
+    nodes = u.get("_nodes", {})
+
+    # Rate limits (3.4.12+)
+    rate_up = u.get("rate_limit_up_bps")
+    rate_down = u.get("rate_limit_down_bps")
 
     links_data = u.get("links", {})
     all_links = links_data.get("classic", []) + links_data.get("secure", []) + links_data.get("tls", [])
@@ -235,7 +239,6 @@ def format_user_detail(u: dict) -> str:
         f"🔌 Соединений: <b>{conns}</b>",
     ]
 
-    # Для кластера показываем распределение по узлам
     if nodes:
         node_lines = []
         for node_name, node_conns in nodes.items():
@@ -260,9 +263,47 @@ def format_user_detail(u: dict) -> str:
         f"  Max TCP: {max_tcp if max_tcp else '—'}  |  Max IP: {max_ip if max_ip else '—'}",
         f"  Квота: {fmt_bytes(quota) if quota else '—'}",
         f"  Истекает: {exp[:10] if exp else '—'}",
+    ]
+
+    # Rate limits — показываем только если заданы
+    if rate_up or rate_down:
+        up_str = f"{fmt_bytes(rate_up)}/с" if rate_up else "—"
+        down_str = f"{fmt_bytes(rate_down)}/с" if rate_down else "—"
+        lines.append(f"  ⬆️ {up_str}  ⬇️ {down_str}")
+
+    lines += [
         "",
         f"🔗 Ссылок: {len(all_links)}",
     ]
+
+    return "\n".join(lines)
+
+
+def format_users_quota(data: dict) -> str:
+    """Форматирует ответ GET /v1/users/quota (3.4.12+)"""
+    lines = ["<b>📊 Квоты пользователей</b>", ""]
+
+    users = data.get("users", [])
+    if not users:
+        lines.append("<i>Квоты не заданы</i>")
+        return "\n".join(lines)
+
+    for u in users:
+        name = u.get("username", "?")
+        used = u.get("total_octets", 0)
+        quota = u.get("data_quota_bytes", 0)
+        if quota:
+            pct = used / quota * 100
+            bar_filled = int(pct / 10)
+            bar = "█" * bar_filled + "░" * (10 - bar_filled)
+            icon = "🔴" if pct >= 90 else ("🟡" if pct >= 70 else "🟢")
+            lines.append(
+                f"{icon} <b>{name}</b>\n"
+                f"  <code>{bar}</code> {pct:.0f}%\n"
+                f"  {fmt_bytes(used)} / {fmt_bytes(quota)}"
+            )
+        else:
+            lines.append(f"⚪ <b>{name}</b> — квота не задана")
 
     return "\n".join(lines)
 

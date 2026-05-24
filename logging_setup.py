@@ -131,7 +131,7 @@ def setup_logging() -> None:
         "aiogram.event":        logging.ERROR,
         "asyncio":              logging.WARNING,
         "PIL":                  logging.WARNING,
-        # Telethon — подавляем INFO/WARNING от MTProto подключений
+        "aiosqlite":            logging.WARNING,  # подавляем DEBUG операции SQLite
         "telethon":             logging.ERROR,
         "telethon.network":     logging.ERROR,
         "telethon.crypto":      logging.ERROR,

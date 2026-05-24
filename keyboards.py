@@ -190,8 +190,10 @@ def user_edit_kb(username: str) -> InlineKeyboardMarkup:
     kb.button(text="📅 Срок действия", callback_data=f"user:editfield:{username}:expiration_rfc3339")
     kb.button(text="💾 Квота",          callback_data=f"user:editfield:{username}:data_quota_bytes")
     kb.button(text="🌐 Max IP",         callback_data=f"user:editfield:{username}:max_unique_ips")
+    kb.button(text="⬆️ Лимит upload",  callback_data=f"user:editfield:{username}:rate_limit_up_bps")
+    kb.button(text="⬇️ Лимит download",callback_data=f"user:editfield:{username}:rate_limit_down_bps")
     kb.button(text="◀️ Назад",          callback_data=f"user:view:{username}")
-    kb.adjust(2, 2, 1, 1)
+    kb.adjust(2, 2, 2, 1, 1)
     return kb.as_markup()
 
 
@@ -212,10 +214,11 @@ def user_links_kb_no_links(username: str) -> InlineKeyboardMarkup:
 
 def users_extra_kb() -> InlineKeyboardMarkup:
     kb = InlineKeyboardBuilder()
-    kb.button(text="⏰ Истекающие",       callback_data="users:expiring")
-    kb.button(text="🧹 Удалить истёкших", callback_data="users:delete_expired_confirm")
-    kb.button(text="◀️ К списку",         callback_data="menu:users")
-    kb.adjust(2, 1)
+    kb.button(text="⏰ Истекающие",        callback_data="users:expiring")
+    kb.button(text="📊 Квоты",             callback_data="users:quota")
+    kb.button(text="🧹 Удалить истёкших",  callback_data="users:delete_expired_confirm")
+    kb.button(text="◀️ К списку",          callback_data="menu:users")
+    kb.adjust(2, 1, 1)
     return kb.as_markup()
 
 
