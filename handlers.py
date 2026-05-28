@@ -679,19 +679,28 @@ async def cb_user_view(cq: CallbackQuery, config: Config):
         results = await asyncio.gather(*[_get_from_node(m) for m in members])
         user = None
         nodes = {}
+        all_ips: set = set()
+        max_recent_ips = 0
+
         for node_name, node_user in results:
             if node_user:
                 if user is None:
                     user = dict(node_user)
                 nodes[node_name] = node_user.get("current_connections", 0)
+                # Собираем IP со всех узлов
+                all_ips.update(node_user.get("active_unique_ips_list", []))
+                max_recent_ips = max(max_recent_ips, node_user.get("recent_unique_ips", 0))
 
         if user is None:
             await cq.answer("❌ Пользователь не найден", show_alert=True)
             return
 
-        # Суммируем соединения и добавляем _nodes
+        # Агрегируем данные
         user["current_connections"] = sum(nodes.values())
         user["_nodes"] = nodes
+        user["active_unique_ips_list"] = list(all_ips)
+        user["active_unique_ips"] = len(all_ips)
+        user["recent_unique_ips"] = max_recent_ips
     else:
         user = await _api_call(cq, client.get_user, username)
         if user is None:
@@ -1171,14 +1180,40 @@ async def _do_search(message: Message, query: str, config: Config):
 @router.message(Command("alert_log"))
 async def cmd_alert_log(message: Message, config: Config):
     _, srv = await get_client(_uid(message), config)
-    rows = await db.get_recent_alerts(srv.name, limit=20)
-    if not rows:
-        await message.answer(f"📋 <b>История алертов — {srv.name}</b>\n\nПусто")
-        return
-    lines = [f"📋 <b>История алертов — {srv.name}</b>\n"]
-    for r in rows:
-        dt = _tz.fmt_dt(r["fired_at"], "%m-%d %H:%M")
-        lines.append(f"<i>{dt}</i> — {r['message']}")
+    members = config.get_group_members(srv)
+
+    if config.is_cluster(srv):
+        # Собираем алерты со всех узлов кластера
+        all_rows = []
+        for member in members:
+            rows = await db.get_recent_alerts(member.name, limit=20)
+            for r in rows:
+                r["_node"] = member.name
+            all_rows.extend(rows)
+
+        # Сортируем по времени (новые сначала) и берём 20
+        all_rows.sort(key=lambda r: r["fired_at"], reverse=True)
+        all_rows = all_rows[:20]
+
+        title = f"cluster {srv.group}" if srv.group else srv.name
+        if not all_rows:
+            await message.answer(f"📋 <b>История алертов — {title}</b>\n\nПусто")
+            return
+        lines = [f"📋 <b>История алертов — {title}</b>\n"]
+        for r in all_rows:
+            dt = _tz.fmt_dt(r["fired_at"], "%m-%d %H:%M")
+            node = r.get("_node", "")
+            lines.append(f"<i>{dt}</i> [{node}] — {r['message']}")
+    else:
+        rows = await db.get_recent_alerts(srv.name, limit=20)
+        if not rows:
+            await message.answer(f"📋 <b>История алертов — {srv.name}</b>\n\nПусто")
+            return
+        lines = [f"📋 <b>История алертов — {srv.name}</b>\n"]
+        for r in rows:
+            dt = _tz.fmt_dt(r["fired_at"], "%m-%d %H:%M")
+            lines.append(f"<i>{dt}</i> — {r['message']}")
+
     await message.answer("\n".join(lines))
 
 

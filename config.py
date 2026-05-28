@@ -57,7 +57,10 @@ class Config:
     thresholds: AlertThresholds = field(default_factory=AlertThresholds)
     default_server: int = 0
     agents: list[AgentConfig] = field(default_factory=list)
-    lite_mode: bool = False  # LITE_MODE=true — минимальный набор функций
+    lite_mode: bool = False
+    # Прокси для подключения к Telegram API (если доступ ограничен)
+    tg_proxy_url: str = ""     # TELEGRAM_PROXY_URL=socks5://user:pass@host:port
+                               # или http://user:pass@host:port
 
     def get_group_members(self, server: ServerConfig) -> list[ServerConfig]:
         """Возвращает все узлы группы. Если сервер одиночный — только он."""
@@ -172,4 +175,5 @@ def load_config() -> Config:
         thresholds=thresholds,
         agents=agents,
         lite_mode=_clean(os.environ.get("LITE_MODE", "false")).lower() in ("true", "1", "yes"),
+        tg_proxy_url=_clean(os.environ.get("TELEGRAM_PROXY_URL", "")),
     )
