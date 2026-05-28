@@ -53,10 +53,24 @@ async def main():
 
     await db.init_db()
 
-    bot = Bot(
+    # Настраиваем прокси для подключения к Telegram API (если задан)
+    bot_kwargs = dict(
         token=config.bot_token,
         default=DefaultBotProperties(parse_mode=ParseMode.HTML),
     )
+    if config.tg_proxy_url:
+        from aiohttp import ClientSession
+        from aiohttp_socks import ProxyConnector
+        if config.tg_proxy_url.startswith("socks"):
+            connector = ProxyConnector.from_url(config.tg_proxy_url)
+            session = ClientSession(connector=connector)
+        else:
+            from aiogram.client.session.aiohttp import AiohttpSession
+            session = AiohttpSession(proxy=config.tg_proxy_url)
+        bot_kwargs["session"] = session
+        logger.info("Telegram прокси: %s", config.tg_proxy_url.split("@")[-1])
+
+    bot = Bot(**bot_kwargs)
     dp = Dispatcher(storage=MemoryStorage())
     dp["config"] = config
 

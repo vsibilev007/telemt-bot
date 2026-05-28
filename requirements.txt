@@ -10,3 +10,4 @@ psutil==7.2.2
 matplotlib==3.10.3
 telethon==1.43.2
 python-socks==2.7.1
+aiohttp-socks==0.10.1

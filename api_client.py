@@ -212,6 +212,7 @@ async def cluster_users_with_nodes(servers: list) -> list[dict]:
     Получает список пользователей и добавляет информацию о том,
     на каком узле кластера активны соединения.
     Возвращает пользователей с полем '_nodes': {'HA_A': conns, 'HA_B': conns}
+    IP-адреса объединяются с всех узлов.
     """
     async def _get_users_from(srv) -> tuple[str, list]:
         try:
@@ -224,7 +225,6 @@ async def cluster_users_with_nodes(servers: list) -> list[dict]:
     # Параллельно опрашиваем все узлы
     results = await asyncio.gather(*[_get_users_from(srv) for srv in servers])
 
-    # Агрегируем — берём данные с первого ответившего как базу
     users_by_name: dict[str, dict] = {}
     for srv_name, users in results:
         for u in users:
@@ -232,11 +232,37 @@ async def cluster_users_with_nodes(servers: list) -> list[dict]:
             if username not in users_by_name:
                 users_by_name[username] = dict(u)
                 users_by_name[username]["_nodes"] = {}
+                users_by_name[username]["_all_ips"] = set()
+
             conns = u.get("current_connections", 0)
             users_by_name[username]["_nodes"][srv_name] = conns
+
             # Суммируем соединения по всем узлам
             users_by_name[username]["current_connections"] = sum(
                 users_by_name[username]["_nodes"].values()
             )
+
+            # Объединяем IP-адреса со всех узлов
+            ip_list = u.get("active_unique_ips_list", [])
+            users_by_name[username]["_all_ips"].update(ip_list)
+
+            # Суммируем active_unique_ips — берём максимум между узлами
+            # (один клиент не может быть на двух узлах с разных IP одновременно)
+            cur_ips = users_by_name[username].get("active_unique_ips", 0)
+            node_ips = u.get("active_unique_ips", 0)
+            users_by_name[username]["active_unique_ips"] = max(cur_ips, node_ips)
+
+            # recent_unique_ips — берём максимум
+            cur_recent = users_by_name[username].get("recent_unique_ips", 0)
+            node_recent = u.get("recent_unique_ips", 0)
+            users_by_name[username]["recent_unique_ips"] = max(cur_recent, node_recent)
+
+    # Финализируем IP-листы
+    for username, u in users_by_name.items():
+        all_ips = list(u.pop("_all_ips", set()))
+        u["active_unique_ips_list"] = all_ips
+        # Если агрегированный список длиннее — обновляем счётчик
+        if len(all_ips) > u.get("active_unique_ips", 0):
+            u["active_unique_ips"] = len(all_ips)
 
     return list(users_by_name.values())
