@@ -132,8 +132,8 @@ class TelemetClient:
         return await self._request("GET", f"/users/{username}")
 
     async def get_users_quota(self) -> dict:
-        """GET /v1/users/quota — сводка использования квот (3.4.12+)"""
-        return await self._request("GET", "/users/quota")
+        """GET /v1/stats/users/quota — сводка использования квот (3.4.12+, путь изменён в 3.4.13)"""
+        return await self._request("GET", "/stats/users/quota")
 
     async def create_user(self, payload: dict) -> dict:
         return await self._request("POST", "/users", json=payload)
