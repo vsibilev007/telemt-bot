@@ -215,6 +215,8 @@ def format_user_list(users: list) -> str:
 
 def format_user_detail(u: dict) -> str:
     conns = u.get("current_connections", 0)
+    # enabled: None — старая версия API (поле отсутствует), считаем включённым
+    enabled = u.get("enabled", None)
     icon = "🟢" if conns > 0 else "⚪"
     octets = fmt_bytes(u.get("total_octets", 0))
     max_tcp = u.get("max_tcp_conns")
@@ -235,6 +237,13 @@ def format_user_detail(u: dict) -> str:
 
     lines = [
         f"<b>{icon} {u['username']}</b>",
+    ]
+
+    # Статус disabled — показываем только если API явно вернул enabled=false
+    if enabled is False:
+        lines.append("🔴 <b>Клиент отключён</b>")
+
+    lines += [
         "",
         f"🔌 Соединений: <b>{conns}</b>",
     ]
@@ -653,3 +662,56 @@ def format_me_writers(d: dict) -> str:
 
     return "\n".join(lines)
 
+
+
+# ─── TLS Fingerprints (3.4.14+) ───────────────────────────────────────────────
+
+def format_tls_fingerprints(d: dict) -> str:
+    enabled = d.get("enabled", False)
+    reason  = d.get("reason")
+
+    if not enabled or reason:
+        return f"<b>🔍 TLS Fingerprints</b>\n\n❌ {reason or 'unavailable'}\n\n<i>Требуется general.beobachten = true в конфиге</i>"
+
+    data       = d.get("data") or {}
+    total      = data.get("total", 0)
+    dropped    = data.get("dropped_total", 0)
+    parse_err  = data.get("parse_error_total", 0)
+    fingerprints = data.get("fingerprints", [])
+
+    lines = [
+        "<b>🔍 TLS Fingerprints</b>",
+        f"<i>Всего уникальных: {total} | Отброшено: {dropped} | Ошибок парсинга: {parse_err}</i>",
+        "",
+    ]
+
+    if not fingerprints:
+        lines.append("— нет данных —")
+        return "\n".join(lines)
+
+    for fp in fingerprints[:15]:
+        ja4    = fp.get("ja4", "?")
+        ja3    = fp.get("ja3", "")
+        count  = fp.get("count", 0)
+        users  = fp.get("users", [])
+        auths  = fp.get("auth_success", 0)
+        fails  = fp.get("auth_fail", 0)
+
+        auth_str = ""
+        if auths or fails:
+            auth_str = f" ✅{auths} ❌{fails}"
+
+        user_str = ""
+        if users:
+            shown = ", ".join(users[:3])
+            if len(users) > 3:
+                shown += f" +{len(users)-3}"
+            user_str = f"\n  👤 {shown}"
+
+        lines.append(f"<code>{ja4}</code> ×{count}{auth_str}{user_str}")
+
+    if len(fingerprints) > 15:
+        lines.append(f"\n<i>…ещё {len(fingerprints) - 15}</i>")
+
+    lines.append(f"\n<i>🕐 {_now_str()}</i>")
+    return "\n".join(lines)
