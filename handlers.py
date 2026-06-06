@@ -26,9 +26,9 @@ from formatters import (
     format_connections, format_dashboard, format_dcs, format_limits,
     format_me_quality, format_me_writers, format_runtime_events,
     format_runtime_gates, format_runtime_init, format_security_posture,
-    format_security_whitelist, format_upstream_quality, format_upstreams,
-    format_user_detail, format_user_list, format_user_links, format_users_quota,
-    fmt_bytes,
+    format_security_whitelist, format_tls_fingerprints, format_upstream_quality,
+    format_upstreams, format_user_detail, format_user_list, format_user_links,
+    format_users_quota, fmt_bytes,
 )
 from keyboards import (
     alerts_kb, dashboard_kb, dcs_kb, dcs_sub_kb, export_menu_kb,
@@ -707,7 +707,8 @@ async def cb_user_view(cq: CallbackQuery, config: Config):
             return
 
     text = format_user_detail(user)
-    kb = user_detail_kb(username)
+    is_enabled = user.get("enabled", None)
+    kb = user_detail_kb(username, enabled=is_enabled)
     if cq.message.photo:
         await cq.answer()
         try:
@@ -742,7 +743,42 @@ async def cb_rotate_secret(cq: CallbackQuery, config: Config):
         f"<code>{new_secret}</code>\n\n"
         f"<i>Сохраните — больше не будет показан</i>",
     )
-    await _safe_edit(cq, format_user_detail(user), reply_markup=user_detail_kb(username))
+    await _safe_edit(cq, format_user_detail(user), reply_markup=user_detail_kb(username, enabled=user.get("enabled", None)))
+
+
+# ─── Toggle user enabled/disabled (3.4.14+) ───────────────────────────────────
+
+@router.callback_query(F.data.startswith("user:toggle:"))
+async def cb_user_toggle(cq: CallbackQuery, config: Config):
+    parts    = cq.data.split(":")
+    username = parts[2]
+    action   = parts[3]   # "enable" или "disable"
+
+    client, srv = await get_client(_uid(cq), config)
+    members     = config.get_group_members(srv)
+
+    method_name = "enable_user" if action == "enable" else "disable_user"
+    results     = await cluster_write(members, method_name, username)
+    ok_results  = [r for r in results if r.ok]
+
+    if not ok_results:
+        await cq.answer("❌ Не удалось изменить статус", show_alert=True)
+        return
+
+    user        = ok_results[0].data
+    status_text = "🟢 Включён" if action == "enable" else "🔴 Отключён"
+    await cq.answer(f"{status_text}: {username}")
+
+    if not _all_ok(results):
+        await cq.message.answer(
+            f"⚠️ Частичный результат:\n{_format_cluster_result([r for r in results if not r.ok])}"
+        )
+
+    await _safe_edit(
+        cq,
+        format_user_detail(user),
+        reply_markup=user_detail_kb(username, enabled=user.get("enabled", None)),
+    )
 
 
 # ─── Traffic history ──────────────────────────────────────────────────────────
@@ -985,7 +1021,7 @@ async def cb_qr_back_user(cq: CallbackQuery, config: Config):
     await cq.bot.send_message(
         chat_id=cq.message.chat.id,
         text=format_user_detail(user),
-        reply_markup=user_detail_kb(username),
+        reply_markup=user_detail_kb(username, enabled=user.get("enabled", None)),
     )
     await cq.answer()
 
@@ -1101,7 +1137,7 @@ async def cmd_adduser(message: Message, config: Config):
     if days:
         msg += f"📅 Срок: {days} дней\n"
     msg += "\n" + format_user_detail(user)
-    await message.answer(msg, reply_markup=user_detail_kb(username))
+    await message.answer(msg, reply_markup=user_detail_kb(username, enabled=user.get("enabled", None)))
 
     if all_links:
         try:
@@ -1160,7 +1196,7 @@ async def _do_search(message: Message, query: str, config: Config):
         u = found[0]
         await message.answer(
             format_user_detail(u),
-            reply_markup=user_detail_kb(u["username"]),
+            reply_markup=user_detail_kb(u["username"], enabled=u.get("enabled", None)),
         )
     else:
         # Показываем список совпадений
@@ -1383,7 +1419,7 @@ async def fsm_create_confirm(message: Message, state: FSMContext, config: Config
         f"✅ <b>{pl['username']}</b> создан!{status_text}\n\n"
         f"🔑 Секрет: <code>{secret}</code>\n\n"
         + format_user_detail(user),
-        reply_markup=user_detail_kb(pl["username"]),
+        reply_markup=user_detail_kb(pl["username"], enabled=user.get("enabled", None)),
     )
 
 
@@ -1468,7 +1504,7 @@ async def fsm_edit_value(message: Message, state: FSMContext, config: Config):
         status = "\n⚠️ " + _format_cluster_result([r for r in results if not r.ok])
     await message.answer(
         f"✅ {label} обновлён{status}\n\n" + format_user_detail(user),
-        reply_markup=user_detail_kb(username),
+        reply_markup=user_detail_kb(username, enabled=user.get("enabled", None)),
     )
 
 
@@ -1507,6 +1543,17 @@ async def cb_runtime_events(cq: CallbackQuery, config: Config):
 @router.callback_query(F.data == "runtime:connections")
 async def cb_runtime_connections(cq: CallbackQuery, config: Config):
     await _cluster_section(cq, config, "get_runtime_connections", format_connections, runtime_sub_kb("connections"))
+
+
+@router.callback_query(F.data == "runtime:tls_fingerprints")
+async def cb_runtime_tls_fingerprints(cq: CallbackQuery, config: Config):
+    """TLS JA3/JA4 fingerprints (3.4.14+). Требует general.beobachten = true."""
+    await _cluster_section(
+        cq, config,
+        "get_runtime_tls_fingerprints",
+        format_tls_fingerprints,
+        runtime_sub_kb("tls_fingerprints"),
+    )
 
 
 # ─── Security ─────────────────────────────────────────────────────────────────

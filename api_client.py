@@ -141,8 +141,20 @@ class TelemetClient:
     async def patch_user(self, username: str, payload: dict) -> dict:
         return await self._request("PATCH", f"/users/{username}", json=payload)
 
+    async def enable_user(self, username: str) -> dict:
+        """POST /v1/users/{username}/enable (3.4.14+)"""
+        return await self._request("POST", f"/users/{username}/enable")
+
+    async def disable_user(self, username: str) -> dict:
+        """POST /v1/users/{username}/disable (3.4.14+)"""
+        return await self._request("POST", f"/users/{username}/disable")
+
     async def delete_user(self, username: str) -> Any:
         return await self._request("DELETE", f"/users/{username}")
+
+    async def get_runtime_tls_fingerprints(self, limit: int = 100) -> dict:
+        """GET /v1/runtime/tls-fingerprints?limit=N (3.4.14+)"""
+        return await self._request("GET", f"/runtime/tls-fingerprints?limit={limit}")
 
     async def ping(self) -> bool:
         try:

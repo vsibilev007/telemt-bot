@@ -131,8 +131,11 @@ def users_list_kb(
             if active_nodes:
                 node_tag = f" [{','.join(active_nodes)}]"
 
+        # enabled=False — явно отключён (3.4.14+); None — поле отсутствует (старый API)
+        disabled_tag = " 🔴" if u.get("enabled") is False else ""
+
         kb.button(
-            text=f"{icon} {name}  |  {traffic}  |  {conns}🔌{ip_tag}{node_tag}",
+            text=f"{icon} {name}  |  {traffic}  |  {conns}🔌{ip_tag}{node_tag}{disabled_tag}",
             callback_data=f"user:view:{name}",
         )
 
@@ -162,16 +165,19 @@ def users_list_kb(
     return kb.as_markup()
 
 
-def user_detail_kb(username: str) -> InlineKeyboardMarkup:
+def user_detail_kb(username: str, enabled: bool = True) -> InlineKeyboardMarkup:
     kb = InlineKeyboardBuilder()
+    toggle_text   = "🟢 Вкл" if enabled else "🔴 Выкл"
+    toggle_action = "disable" if enabled else "enable"
     kb.button(text="✏️ Редактировать",    callback_data=f"user:edit:{username}")
     kb.button(text="🗑️ Удалить",          callback_data=f"user:delete_confirm:{username}")
+    kb.button(text=toggle_text,            callback_data=f"user:toggle:{username}:{toggle_action}")
     kb.button(text="🔗 Ссылки",           callback_data=f"user:links:{username}")
     kb.button(text="🔄 Сменить секрет",   callback_data=f"user:rotate_secret:{username}")
     kb.button(text="📊 История трафика",  callback_data=f"user:traffic:{username}")
     kb.button(text="🔄 Обновить",         callback_data=f"user:view:{username}")
     kb.button(text="◀️ К списку",         callback_data="menu:users")
-    kb.adjust(2, 1, 2, 1, 1)
+    kb.adjust(2, 1, 2, 1, 1, 1)
     return kb.as_markup()
 
 
@@ -310,8 +316,9 @@ def runtime_kb() -> InlineKeyboardMarkup:
     kb.button(text="🔗 Upstream Quality", callback_data="runtime:upstream_quality")
     kb.button(text="📋 Events",           callback_data="runtime:events")
     kb.button(text="👥 Connections",      callback_data="runtime:connections")
+    kb.button(text="🔍 TLS Fingerprints", callback_data="runtime:tls_fingerprints")
     kb.button(text="◀️ Меню",             callback_data="menu:main")
-    kb.adjust(2, 2, 2, 1)
+    kb.adjust(2, 2, 2, 1, 1)
     return kb.as_markup()
 
 
