@@ -671,17 +671,26 @@ def format_tls_fingerprints(d: dict) -> str:
     reason  = d.get("reason")
 
     if not enabled or reason:
-        return f"<b>🔍 TLS Fingerprints</b>\n\n❌ {reason or 'unavailable'}\n\n<i>Требуется general.beobachten = true в конфиге</i>"
+        return (
+            f"<b>🔍 TLS Fingerprints</b>\n\n"
+            f"❌ {reason or 'unavailable'}\n\n"
+            f"<i>Требуется general.beobachten = true в конфиге</i>"
+        )
 
-    data       = d.get("data") or {}
-    total      = data.get("total", 0)
-    dropped    = data.get("dropped_total", 0)
-    parse_err  = data.get("parse_error_total", 0)
-    fingerprints = data.get("fingerprints", [])
+    data         = d.get("data") or {}
+    fingerprints = data.get("by_fingerprint", [])
+    dropped      = data.get("dropped_total", 0)
+    parse_err    = data.get("parse_error_total", 0)
+    retention    = data.get("retention_secs", 0)
+    total        = len(fingerprints)
+
+    auth_total = sum(fp.get("auth_success", 0) for fp in fingerprints)
+    bad_total  = sum(fp.get("bad_or_probe", 0) for fp in fingerprints)
 
     lines = [
         "<b>🔍 TLS Fingerprints</b>",
-        f"<i>Всего уникальных: {total} | Отброшено: {dropped} | Ошибок парсинга: {parse_err}</i>",
+        f"<i>Уникальных: {total} | ✅ {auth_total} успешных | 🔴 {bad_total} плохих/зондов</i>",
+        f"<i>Окно: {retention // 60} мин | Отброшено: {dropped} | Ошибок: {parse_err}</i>",
         "",
     ]
 
@@ -689,26 +698,34 @@ def format_tls_fingerprints(d: dict) -> str:
         lines.append("— нет данных —")
         return "\n".join(lines)
 
-    for fp in fingerprints[:15]:
-        ja4    = fp.get("ja4", "?")
-        ja3    = fp.get("ja3", "")
-        count  = fp.get("count", 0)
-        users  = fp.get("users", [])
-        auths  = fp.get("auth_success", 0)
-        fails  = fp.get("auth_fail", 0)
+    # Сортируем по total desc
+    for fp in sorted(fingerprints, key=lambda x: -x.get("total", 0))[:15]:
+        ja4       = fp.get("ja4", "?")
+        ja3       = fp.get("ja3", "")
+        total_fp  = fp.get("total", 0)
+        auths     = fp.get("auth_success", 0)
+        bad       = fp.get("bad_or_probe", 0)
+        first     = fp.get("first_seen_epoch_secs")
+        last      = fp.get("last_seen_epoch_secs")
 
-        auth_str = ""
-        if auths or fails:
-            auth_str = f" ✅{auths} ❌{fails}"
+        # Статус строки
+        if bad > 0 and auths == 0:
+            status = "🔴"
+        elif bad > 0:
+            status = "🟡"
+        else:
+            status = "🟢"
 
-        user_str = ""
-        if users:
-            shown = ", ".join(users[:3])
-            if len(users) > 3:
-                shown += f" +{len(users)-3}"
-            user_str = f"\n  👤 {shown}"
+        time_str = ""
+        if last:
+            time_str = f" · {_tz.fmt_dt(last, '%H:%M')}"
 
-        lines.append(f"<code>{ja4}</code> ×{count}{auth_str}{user_str}")
+        lines.append(
+            f"{status} <code>{ja4}</code>{time_str}\n"
+            f"   ×{total_fp} всего | ✅{auths} | 🔴{bad}"
+        )
+        if ja3:
+            lines.append(f"   JA3: <code>{ja3[:16]}…</code>")
 
     if len(fingerprints) > 15:
         lines.append(f"\n<i>…ещё {len(fingerprints) - 15}</i>")
