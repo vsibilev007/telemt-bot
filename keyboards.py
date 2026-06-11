@@ -373,7 +373,7 @@ def dcs_sub_kb(section: str) -> InlineKeyboardMarkup:
     return kb.as_markup()
 
 
-def proxy_check_kb(has_result: bool = False) -> InlineKeyboardMarkup:
+def proxy_check_kb() -> InlineKeyboardMarkup:
     kb = InlineKeyboardBuilder()
     kb.button(text="🔍 Проверить ещё", callback_data="proxy:check_again")
     kb.button(text="◀️ Меню",          callback_data="menu:main")

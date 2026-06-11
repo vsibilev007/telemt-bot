@@ -252,7 +252,14 @@ async def cb_noop(cq: CallbackQuery):
 
 @router.callback_query(F.data.startswith("server:select:"))
 async def cb_server_select(cq: CallbackQuery, config: Config):
-    idx = int(cq.data.split(":")[-1])
+    try:
+        idx = int(cq.data.split(":")[-1])
+    except (ValueError, IndexError):
+        await cq.answer("❌ Неверный индекс", show_alert=True)
+        return
+    if idx < 0 or idx >= len(config.servers):
+        await cq.answer("❌ Сервер не найден", show_alert=True)
+        return
     await set_server_index(_uid(cq), idx)
     srv = config.servers[idx]
     await cq.answer(f"✅ {srv.name}", show_alert=False)
@@ -379,10 +386,8 @@ async def cb_traffic_report_menu(cq: CallbackQuery):
 @router.callback_query(F.data.startswith("traffic_report:"))
 async def cb_traffic_report(cq: CallbackQuery, config: Config):
     days = int(cq.data.split(":")[-1])
-    _, srv = await get_client(_uid(cq), config)
+    client, srv = await get_client(_uid(cq), config)
     await cq.answer("⏳ Считаю...")
-
-    client, _ = await get_client(_uid(cq), config)
     users_task = client.get_users()
     deltas_task = db.get_all_users_traffic_delta(srv.name, days=days)
     try:
@@ -465,8 +470,12 @@ async def cb_users(cq: CallbackQuery, config: Config):
 
 @router.callback_query(F.data.startswith("users:page:"))
 async def cb_users_page(cq: CallbackQuery, config: Config):
-    page = int(cq.data.split(":")[-1])
-    await _show_users(cq, config, page)
+    try:
+        page = int(cq.data.split(":")[-1])
+    except (ValueError, IndexError):
+        await cq.answer("❌ Неверная страница", show_alert=True)
+        return
+    await _show_users(cq, config, max(0, page))
 
 
 @router.callback_query(F.data == "users:refresh")
@@ -751,8 +760,14 @@ async def cb_rotate_secret(cq: CallbackQuery, config: Config):
 @router.callback_query(F.data.startswith("user:toggle:"))
 async def cb_user_toggle(cq: CallbackQuery, config: Config):
     parts    = cq.data.split(":")
+    if len(parts) < 4:
+        await cq.answer("❌ Неверный формат", show_alert=True)
+        return
     username = parts[2]
     action   = parts[3]   # "enable" или "disable"
+    if action not in ("enable", "disable"):
+        await cq.answer("❌ Неизвестное действие", show_alert=True)
+        return
 
     client, srv = await get_client(_uid(cq), config)
     members     = config.get_group_members(srv)
@@ -853,7 +868,7 @@ async def cb_user_traffic_chart(cq: CallbackQuery, config: Config):
         await cq.answer("⚠️ Мало данных (нужно минимум 2 точки)", show_alert=True)
         return
 
-    buf = await asyncio.get_event_loop().run_in_executor(
+    buf = await asyncio.get_running_loop().run_in_executor(
         None, charts.render_user_traffic, rows, username, days, srv.name
     )
     if buf is None:
@@ -900,14 +915,13 @@ async def cb_traffic_report_chart(cq: CallbackQuery, config: Config):
         await cq.answer("⚠️ Нет данных за период", show_alert=True)
         return
 
-    buf = await asyncio.get_event_loop().run_in_executor(
+    buf = await asyncio.get_running_loop().run_in_executor(
         None, charts.render_traffic_report, deltas, days, srv.name
     )
     if buf is None:
         await cq.answer("⚠️ matplotlib не установлен на сервере", show_alert=True)
         return
 
-    from aiogram.types import BufferedInputFile, InputMediaPhoto
     media = InputMediaPhoto(
         media=BufferedInputFile(buf.read(), filename=f"report_{srv.name}_{days}d.png"),
         caption=f"📈 Топ клиентов — {days} дн. • {srv.name}",
@@ -919,7 +933,10 @@ async def cb_traffic_report_chart(cq: CallbackQuery, config: Config):
         except TelegramBadRequest:
             await cq.answer()  # контент не изменился — просто убираем часики
     else:
-        await cq.message.delete()
+        try:
+            await cq.message.delete()
+        except Exception:
+            pass
         await cq.message.answer_photo(
             BufferedInputFile(buf.getvalue(), filename=f"report_{srv.name}_{days}d.png"),
             caption=f"📈 Топ клиентов — {days} дн. • {srv.name}",
@@ -1678,7 +1695,7 @@ async def fsm_proxy_check_url(message: Message, state: FSMContext, config: Confi
     # Только после результата показываем кнопки «Проверить ещё» и «Меню»
     await message.answer(
         pc.format_proxy_result(info),
-        reply_markup=proxy_check_kb(has_result=True),
+        reply_markup=proxy_check_kb(),
     )
 
 

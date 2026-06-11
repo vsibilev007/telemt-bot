@@ -264,7 +264,7 @@ async def _check_health():
             except Exception:
                 pass
 
-        except (ApiError, Exception) as e:
+        except Exception as e:
             prev = await db.get_server_status(srv.name)
             if not prev or prev["status"] != "unreachable":
                 await db.update_server_status(srv.name, "unreachable", 0)

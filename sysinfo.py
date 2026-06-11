@@ -40,7 +40,7 @@ def _fmt_uptime(seconds: float) -> str:
 
 async def get_system_info() -> dict:
     """Собирает системную информацию — запускается в executor чтобы не блокировать event loop"""
-    loop = asyncio.get_event_loop()
+    loop = asyncio.get_running_loop()
     return await loop.run_in_executor(None, _collect_sync)
 
 
