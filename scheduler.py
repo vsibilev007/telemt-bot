@@ -225,6 +225,7 @@ async def _check_health():
                 prev_counters = json.loads(prev_raw) if prev_raw else {}
                 await _set_meta(srv.name, "counters", json.dumps(current_counters))
 
+
                 if prev_counters:
                     def delta(key: str) -> int:
                         return current_counters.get(key, 0) - prev_counters.get(key, 0)

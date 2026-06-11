@@ -66,6 +66,22 @@ async def init_db():
             CREATE INDEX IF NOT EXISTS idx_alert_log_lookup
                 ON alert_log(server_name, alert_type, fired_at);
 
+            -- История DPI/ТСПУ счётчиков (каждые 2 мин)
+            CREATE TABLE IF NOT EXISTS dpi_history (
+                id                      INTEGER PRIMARY KEY AUTOINCREMENT,
+                server_name             TEXT NOT NULL,
+                sampled_at              INTEGER NOT NULL,
+                connections_total       INTEGER NOT NULL DEFAULT 0,
+                unknown_tls_sni         INTEGER NOT NULL DEFAULT 0,
+                tls_handshake_bad_client INTEGER NOT NULL DEFAULT 0,
+                direct_modes_disabled   INTEGER NOT NULL DEFAULT 0,
+                hs_timeout              INTEGER NOT NULL DEFAULT 0,
+                hs_connection_reset     INTEGER NOT NULL DEFAULT 0,
+                hs_unexpected_eof       INTEGER NOT NULL DEFAULT 0
+            );
+            CREATE INDEX IF NOT EXISTS idx_dpi_server_time
+                ON dpi_history(server_name, sampled_at);
+
             -- Мета-данные серверов (version, counters и т.п.)
             CREATE TABLE IF NOT EXISTS server_meta (
                 server_name TEXT NOT NULL,
@@ -274,6 +290,7 @@ async def set_user_server_index(user_id: int, index: int):
             (user_id, index, _now()),
         )
         await db.commit()
+
 
 
 # ─── Очистка ──────────────────────────────────────────────────────────────────
