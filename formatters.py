@@ -666,6 +666,34 @@ def format_me_writers(d: dict) -> str:
 
 # ─── TLS Fingerprints (3.4.14+) ───────────────────────────────────────────────
 
+def _fmt_fp_row(fp: dict, show_scope: bool = False) -> list[str]:
+    ja4   = fp.get("ja4", "?")
+    ja3   = fp.get("ja3", "")
+    total = fp.get("total", 0)
+    auths = fp.get("auth_success", 0)
+    bad   = fp.get("bad_or_probe", 0)
+    last  = fp.get("last_seen_epoch_secs")
+    scope = fp.get("scope", "")
+
+    if bad > 0 and auths == 0:
+        status = "🔴"
+    elif bad > 0:
+        status = "🟡"
+    else:
+        status = "🟢"
+
+    time_str  = f"  <i>{_tz.fmt_dt(last, '%H:%M')}</i>" if last else ""
+    scope_str = ("\n  📍 <code>" + scope + "</code>") if show_scope and scope else ""
+    ja3_str   = ("\n  JA3: <code>" + ja3 + "</code>") if ja3 else ""
+
+    row = (
+        status + " <code>" + ja4 + "</code>" + time_str + "\n"
+        + "  ×" + str(total) + " | ✅" + str(auths) + " | 🔴" + str(bad)
+        + ja3_str + scope_str
+    )
+    return [row]
+
+
 def format_tls_fingerprints(d: dict) -> str:
     enabled = d.get("enabled", False)
     reason  = d.get("reason")
@@ -678,57 +706,63 @@ def format_tls_fingerprints(d: dict) -> str:
         )
 
     data         = d.get("data") or {}
-    fingerprints = data.get("by_fingerprint", [])
+    by_fp        = data.get("by_fingerprint", [])
+    by_ip        = data.get("by_ip", [])
+    by_cidr      = data.get("by_cidr", [])
+    by_user      = data.get("by_user", [])
     dropped      = data.get("dropped_total", 0)
     parse_err    = data.get("parse_error_total", 0)
     retention    = data.get("retention_secs", 0)
-    total        = len(fingerprints)
 
-    auth_total = sum(fp.get("auth_success", 0) for fp in fingerprints)
-    bad_total  = sum(fp.get("bad_or_probe", 0) for fp in fingerprints)
+    auth_total = sum(fp.get("auth_success", 0) for fp in by_fp)
+    bad_total  = sum(fp.get("bad_or_probe", 0) for fp in by_fp)
 
     lines = [
         "<b>🔍 TLS Fingerprints</b>",
-        f"<i>Уникальных: {total} | ✅ {auth_total} успешных | 🔴 {bad_total} плохих/зондов</i>",
+        f"<i>Уникальных: {len(by_fp)} | ✅ {auth_total} успешных | 🔴 {bad_total} плохих/зондов</i>",
         f"<i>Окно: {retention // 60} мин | Отброшено: {dropped} | Ошибок: {parse_err}</i>",
-        "",
     ]
 
-    if not fingerprints:
-        lines.append("— нет данных —")
-        return "\n".join(lines)
+    sep = "┄" * 20
 
-    # Сортируем по total desc
-    for fp in sorted(fingerprints, key=lambda x: -x.get("total", 0))[:15]:
-        ja4       = fp.get("ja4", "?")
-        ja3       = fp.get("ja3", "")
-        total_fp  = fp.get("total", 0)
-        auths     = fp.get("auth_success", 0)
-        bad       = fp.get("bad_or_probe", 0)
-        first     = fp.get("first_seen_epoch_secs")
-        last      = fp.get("last_seen_epoch_secs")
+    # ── by_fingerprint ────────────────────────────────────────────────────────
+    if by_fp:
+        lines += ["", "<b>По fingerprint:</b>"]
+        rows = sorted(by_fp, key=lambda x: -x.get("total", 0))[:10]
+        for i, fp in enumerate(rows):
+            if i > 0:
+                lines.append(sep)
+            lines += _fmt_fp_row(fp, show_scope=False)
 
-        # Статус строки
-        if bad > 0 and auths == 0:
-            status = "🔴"
-        elif bad > 0:
-            status = "🟡"
-        else:
-            status = "🟢"
+    # ── by_ip — только плохие ─────────────────────────────────────────────────
+    bad_by_ip = [fp for fp in by_ip if fp.get("bad_or_probe", 0) > 0]
+    if bad_by_ip:
+        lines += ["", "<b>🔴 Плохие по IP:</b>"]
+        rows = sorted(bad_by_ip, key=lambda x: -x.get("bad_or_probe", 0))[:5]
+        for i, fp in enumerate(rows):
+            if i > 0:
+                lines.append(sep)
+            lines += _fmt_fp_row(fp, show_scope=True)
 
-        time_str = ""
-        if last:
-            time_str = f" · {_tz.fmt_dt(last, '%H:%M')}"
+        # ── by_user ───────────────────────────────────────────────────────────────
+    if by_user:
+        lines += ["", "<b>По пользователям:</b>"]
+        user_totals: dict[str, dict] = {}
+        for fp in by_user:
+            scope = fp.get("scope", "?")
+            if scope not in user_totals:
+                user_totals[scope] = {"total": 0, "auth_success": 0, "bad_or_probe": 0}
+            user_totals[scope]["total"]        += fp.get("total", 0)
+            user_totals[scope]["auth_success"] += fp.get("auth_success", 0)
+            user_totals[scope]["bad_or_probe"] += fp.get("bad_or_probe", 0)
 
-        lines.append(
-            f"{status} <code>{ja4}</code>{time_str}\n"
-            f"   ×{total_fp} всего | ✅{auths} | 🔴{bad}"
-        )
-        if ja3:
-            lines.append(f"   JA3: <code>{ja3[:16]}…</code>")
-
-    if len(fingerprints) > 15:
-        lines.append(f"\n<i>…ещё {len(fingerprints) - 15}</i>")
+        for username, stats in sorted(user_totals.items(), key=lambda x: -x[1]["total"])[:8]:
+            bad  = stats["bad_or_probe"]
+            auth = stats["auth_success"]
+            icon = "🔴" if bad > 0 and auth == 0 else ("🟡" if bad > 0 else "🟢")
+            lines.append(f"  {icon} <b>{username}</b>  ×{stats['total']} | ✅{auth} | 🔴{bad}")
 
     lines.append(f"\n<i>🕐 {_now_str()}</i>")
     return "\n".join(lines)
+
+
