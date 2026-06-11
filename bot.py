@@ -59,15 +59,17 @@ async def main():
         default=DefaultBotProperties(parse_mode=ParseMode.HTML),
     )
     if config.tg_proxy_url:
-        from aiohttp import ClientSession
         from aiohttp_socks import ProxyConnector
         if config.tg_proxy_url.startswith("socks"):
+            from aiohttp import ClientSession
             connector = ProxyConnector.from_url(config.tg_proxy_url)
             session = ClientSession(connector=connector)
+            bot_kwargs["session"] = session
+            bot_kwargs["_custom_connector"] = connector
         else:
             from aiogram.client.session.aiohttp import AiohttpSession
             session = AiohttpSession(proxy=config.tg_proxy_url)
-        bot_kwargs["session"] = session
+            bot_kwargs["session"] = session
         logger.info("Telegram прокси: %s", config.tg_proxy_url.split("@")[-1])
 
     bot = Bot(**bot_kwargs)
@@ -96,6 +98,9 @@ async def main():
     finally:
         sched.stop()
         await bot.session.close()
+        custom_connector = bot_kwargs.get("_custom_connector")
+        if custom_connector:
+            await custom_connector.close()
         logger.info("Бот остановлен")
 
 

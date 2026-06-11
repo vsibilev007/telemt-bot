@@ -14,8 +14,6 @@ def _epoch_to_str(epoch: int) -> str:
     return _tz.fmt_datetime(epoch)
 
 
-def _now_str() -> str:
-    return _tz.now_str()
 def fmt_bytes(b: Optional[int]) -> str:
     if b is None:
         return "—"

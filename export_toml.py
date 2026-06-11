@@ -7,9 +7,11 @@ from datetime import datetime
 from aiogram import Router, F
 from aiogram.types import BufferedInputFile, CallbackQuery
 
+import os
+
 router = Router()
 
-CONFIG_PATH = "/etc/telemt/telemt.toml"
+CONFIG_PATH = os.environ.get("TELEMT_CONFIG_PATH", "/etc/telemt/telemt.toml")
 
 
 @router.callback_query(F.data == "users:export_toml")

@@ -12,36 +12,95 @@ Telegram-бот для управления [Telemt MTProxy](https://github.com/
 - **Проверка прокси** — анализ MTProto-ссылок с нескольких точек (EU, RU и др.)
 - **Lite режим** — минимальный набор функций без алертов и графиков
 
+---
+
 ## Требования
 
-- Python 3.11+
-- [Telemt MTProxy](https://github.com/telemt/telemt) с включённым Control API (`api_addr = "127.0.0.1:9091"`)
-- `matplotlib` — для графиков трафика *(опционально)*
-- `telethon` + `python-socks` — для MTProto-проверки прокси *(опционально)*
+| Компонент | Версия | Обязательно |
+|-----------|--------|-------------|
+| Python | 3.11+ | Да |
+| Telemt MTProxy | с Control API | Да |
+| matplotlib | — | Для графиков |
+| telethon + python-socks | — | Для MTProto-проверки прокси |
 
-## Быстрый старт
+---
+
+## Установка на свежей системе
+
+### 1. Установить Python и зависимости
+
+**Ubuntu / Debian:**
+
+```bash
+sudo apt update && sudo apt install -y python3 python3-venv python3-pip git
+```
+
+**CentOS / RHEL / AlmaLinux:**
+
+```bash
+sudo dnf install -y python3 python3-pip git
+```
+
+**Alpine:**
+
+```bash
+sudo apk add python3 py3-pip git
+```
+
+### 2. Клонировать репозиторий
 
 ```bash
 git clone https://github.com/vsibilev007/telemt-bot.git
 cd telemt-bot
+```
 
-# Установка зависимостей
+### 3. Создать виртуальное окружение и установить зависимости
+
+```bash
 python3 -m venv venv
 source venv/bin/activate
 pip install -r requirements.txt
+```
 
-# Конфигурация
+### 4. Настроить конфигурацию
+
+```bash
 cp .env.example .env
 nano .env
+```
 
-# Запуск
+Заполни обязательные параметры:
+
+```env
+BOT_TOKEN=1234567890:AABBCCDDEEFFaabbccddeeff
+ALLOWED_USERS=123456789
+SERVER_URL=http://127.0.0.1:9091
+SERVER_NAME=My Telemt
+SERVER_AUTH=
+```
+
+> `BOT_TOKEN` — получить у [@BotFather](https://t.me/BotFather).
+> `ALLOWED_USERS` — Telegram user_id через запятую. Узнать: [@userinfobot](https://t.me/userinfobot).
+> `SERVER_URL` — адрес Control API Telemt (по умолчанию `127.0.0.1:9091`).
+
+### 5. Запустить
+
+```bash
+source venv/bin/activate
 python bot.py
 ```
 
-## Установка через systemd
+Бот готов. Открой его в Telegram и нажми `/start`.
+
+---
+
+## Установка как systemd-сервис
+
+### Бот
+
+Создай файл `/etc/systemd/system/telemt-bot.service`:
 
 ```ini
-# /etc/systemd/system/telemt-bot.service
 [Unit]
 Description=Telemt Manager Bot
 After=network.target
@@ -49,9 +108,9 @@ After=network.target
 [Service]
 Type=simple
 User=root
-WorkingDirectory=/root/telemt_bot
-EnvironmentFile=/root/telemt_bot/.env
-ExecStart=/root/telemt_bot/venv/bin/python bot.py
+WorkingDirectory=/opt/telemt-bot
+EnvironmentFile=/opt/telemt-bot/.env
+ExecStart=/opt/telemt-bot/venv/bin/python bot.py
 Restart=on-failure
 RestartSec=5
 
@@ -59,7 +118,7 @@ RestartSec=5
 WantedBy=multi-user.target
 ```
 
-> ⚠️ Замени `/root/telemt_bot` на реальный путь к боту.
+> Замени `/opt/telemt-bot` на реальный путь к проекту.
 
 ```bash
 systemctl daemon-reload
@@ -67,18 +126,54 @@ systemctl enable --now telemt-bot
 journalctl -u telemt-bot -f
 ```
 
-## Конфигурация
+### Агент проверки прокси (опционально)
 
-Все настройки задаются через файл `.env`. Пример — `.env.example`.
+Агент нужен, если хочешь проверять доступность прокси с дополнительных серверов (RU, Asia и т.д.). Агент — отдельный скрипт `proxy_agent.py` без внешних зависимостей.
 
-### Обязательные параметры
+Скопируй `proxy_agent.py` на удалённый сервер и создай файл `/etc/systemd/system/proxy-agent.service`:
 
-```env
-BOT_TOKEN=1234567890:AABBCCDDEEFFaabbccddeeff
-ALLOWED_USERS=123456789
+```ini
+[Unit]
+Description=Proxy Check Agent
+After=network.target
+
+[Service]
+Type=simple
+User=root
+ExecStart=/usr/bin/python3 /opt/proxy_agent.py --host 0.0.0.0 --port 8765 --token YOUR_TOKEN
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
 ```
 
-### Серверы Telemt
+```bash
+systemctl daemon-reload
+systemctl enable --now proxy-agent
+```
+
+На основном сервере добавь в `.env`:
+
+```env
+AGENT_1_URL=http://IP_АГЕНТА:8765
+AGENT_1_NAME=RU
+AGENT_1_TOKEN=YOUR_TOKEN
+AGENT_1_FLAG=🇷🇺
+```
+
+---
+
+## Конфигурация (`.env`)
+
+### Обязательные
+
+| Переменная | Описание |
+|------------|----------|
+| `BOT_TOKEN` | Токен бота от @BotFather |
+| `ALLOWED_USERS` | Telegram user_id через запятую |
+
+### Серверы
 
 **Один сервер:**
 
@@ -91,16 +186,16 @@ SERVER_AUTH=
 **Несколько серверов:**
 
 ```env
-SERVER_1_URL=http://127.0.0.1:9091
+SERVER_1_URL=http://10.0.0.1:9091
 SERVER_1_NAME=Main
-SERVER_1_AUTH=
+SERVER_1_AUTH=secret1
 
 SERVER_2_URL=http://10.0.0.2:9091
 SERVER_2_NAME=Backup
-SERVER_2_AUTH=
+SERVER_2_AUTH=secret2
 ```
 
-**Кластер HA** — серверы с одинаковым `GROUP` объединяются в кластер. В меню отображаются как одна кнопка `⚙️ cluster_ha`:
+**Кластер HA** — серверы с одинаковым `GROUP`:
 
 ```env
 SERVER_1_URL=http://10.0.0.1:9091
@@ -110,83 +205,142 @@ SERVER_1_GROUP=cluster_ha
 SERVER_2_URL=http://10.0.0.2:9091
 SERVER_2_NAME=HA_B
 SERVER_2_GROUP=cluster_ha
-
-SERVER_3_URL=http://10.0.0.3:9091
-SERVER_3_NAME=Backup
-# GROUP не задан — одиночный сервер
 ```
 
 ### Прочие параметры
 
-|Переменная |Описание                                |Значение по умолчанию|
-|-----------|----------------------------------------|---------------------|
-|`TZ`       |Часовой пояс                            |системный            |
-|`LITE_MODE`|Минимальный режим без алертов и графиков|`false`              |
-|`LOG_LEVEL`|Уровень логов                           |`INFO`               |
-|`LOG_FILE` |Файл логов (пусто = только stdout)      |—                    |
+| Переменная | Описание | По умолчанию |
+|------------|----------|--------------|
+| `TZ` | Часовой пояс | системный |
+| `LITE_MODE` | Минимальный режим | `false` |
+| `LOG_LEVEL` | Уровень логов | `INFO` |
+| `LOG_FILE` | Файл логов | — (stdout) |
+| `LOG_MAX_MB` | Макс. размер файла | `10` |
+| `LOG_BACKUPS` | Кол-во бэкапов | `3` |
+| `NO_COLOR` | Отключить ANSI | — |
+| `TELEMT_CONFIG_PATH` | Путь к telemt.toml | `/etc/telemt/telemt.toml` |
+| `TELEGRAM_PROXY_URL` | Прокси для Telegram API | — |
 
-### Пороги алертов *(опционально)*
+### Пороги алертов
 
 ```env
-ALERT_CONN_SPIKE_PCT=50       # всплеск соединений, %
-ALERT_WRITERS_LOW_PCT=80      # минимальный coverage ME Writers, %
-ALERT_HS_TIMEOUT_SPIKE=50     # handshake timeout, +N за 2 мин
-ALERT_BAD_CLIENT_SPIKE=100    # плохих TLS клиентов, +N за 2 мин
-ALERT_QUOTA_PCT=80            # порог квоты, %
+ALERT_CONN_SPIKE_PCT=50        # всплеск соединений, %
+ALERT_CONN_SPIKE_MIN_BASE=100  # мин. база для срабатывания
+ALERT_WRITERS_LOW_PCT=80       # порог ME Writers coverage, %
+ALERT_HS_TIMEOUT_SPIKE=50      # handshake timeout, +N за 2 мин
+ALERT_BAD_CLIENT_SPIKE=100     # плохих TLS, +N за 2 мин
+ALERT_QUOTA_PCT=80             # порог квоты клиента, %
 ```
+
+### Прокси для Telegram API
+
+```env
+TELEGRAM_PROXY_URL=socks5://user:password@host:port
+TELEGRAM_PROXY_URL=http://host:port
+```
+
+Поддержка SOCKS5, SOCKS4, HTTP. Логин/пароль скрывается в логах.
+
+---
 
 ## Lite режим
 
-`LITE_MODE=true` оставляет только базовый функционал:
+`LITE_MODE=true` — минимальный набор без графиков и алертов:
 
-|Остаётся           |Отключается         |
-|-------------------|--------------------|
-|🟢 Состояние сервера|📊 Отчёт по трафику  |
-|👥 Клиенты          |⚠️ Истекающие        |
-|➕ Создание клиентов|🔒 Безопасность      |
-|⚡ Runtime          |📡 DC / Writers      |
-|📤 Бэкап            |🔍 Проверка прокси   |
-|                   |🔔 Алерты и scheduler|
+| Остаётся | Отключается |
+|----------|-------------|
+| 🟢 Состояние сервера | 📊 Отчёт по трафику |
+| 👥 Клиенты | ⚠️ Истекающие |
+| ➕ Создание клиентов | 🔒 Безопасность, Upstreams, DC/Writers |
+| ⚡ Runtime | 🔍 Проверка прокси |
+| 📤 Бэкап | 🔔 Алерты и scheduler |
+
+---
+
+## Команды
+
+| Команда | Описание |
+|---------|----------|
+| `/start` | Приветствие и главное меню |
+| `/menu` | Главное меню |
+| `/help` | Справка |
+| `/adduser имя [дней]` | Быстро создать клиента |
+| `/find запрос` | Поиск клиента по имени |
+| `/alerts` | Настройки алертов |
+| `/alert_log` | История последних 20 алертов |
+| `/id` | Ваш Telegram ID |
+| `/status` | Статус всех серверов |
+
+---
+
+## Алерты
+
+| Тип | Событие | Cooldown |
+|-----|---------|----------|
+| `status_down` | Сервер недоступен | 5 мин |
+| `status_up` | Сервер восстановился | — |
+| `conn_spike` | Всплеск соединений >50% | 2 мин |
+| `writers_low` | ME Writers coverage <80% | 2 мин |
+| `version_change` | Обновление версии telemt | — |
+| `bad_unknown_sni` | Неизвестный TLS SNI | 5 мин |
+| `hs_timeout_spike` | Handshake timeout +50 за 2 мин | 2 мин |
+| `bad_client_spike` | Плохих TLS клиентов +100 за 2 мин | 2 мин |
+| `hs_conn_reset` | Сброс при handshake | 5 мин |
+| `quota_warn` | Клиент использовал ≥80% квоты | 1 час |
+
+Настройка через `/alerts`, история через `/alert_log`.
+
+---
 
 ## Проверка MTProto прокси
 
-Бот анализирует ссылки вида `tg://proxy?...` или `https://t.me/proxy?...`:
+Бот анализирует ссылки `tg://proxy?...` и `https://t.me/proxy?...`:
 
 - Тип секрета: FakeTLS / DD / Simple
 - SNI — домен маскировки (для FakeTLS)
 - TCP + MTProto хэндшейк с EU-сервера
-- TCP + TLS хэндшейк с дополнительных агентов (RU и др.)
+- TCP + TLS хэндшейк с агентов (RU и др.)
 
-### Установка агента на дополнительный сервер
+### Настройка агента
 
-Агент (`proxy_agent.py`) — лёгкий HTTP-сервис без внешних зависимостей.
-Запускается на RU-сервере (или любом другом) и позволяет боту проверять
-доступность прокси с этой точки.
+#### Шаг 1 — Скопировать `proxy_agent.py` на удалённый сервер
 
-**Шаг 1 — Скопировать агент на сервер**
+**Вариант A — Скачать из GitHub (самый простой):**
 
 ```bash
-# На сервере где запущен бот — скачать агент из репозитория
-curl -o /root/proxy_agent.py \
+ssh root@IP_СЕРВЕРА
+curl -o /opt/proxy_agent.py \
   https://raw.githubusercontent.com/vsibilev007/telemt-bot/main/proxy_agent.py
-
-# Или скопировать с основного сервера по SCP
-scp /root/telemt_bot/proxy_agent.py root@IP:/root/proxy_agent.py
 ```
 
-**Шаг 2 — Проверить что работает**
+**Вариант B — Скопировать по SCP с основного сервера:**
 
 ```bash
-python3 /root/proxy_agent.py --host 127.0.0.1 --port 8765 --token YOUR_TOKEN
+scp /opt/telemt-bot/proxy_agent.py root@IP_СЕРВЕРА:/opt/proxy_agent.py
+```
+
+**Вариант C — Клонировать весь репозиторий:**
+
+```bash
+ssh root@IP_СЕРВЕРА
+git clone https://github.com/vsibilev007/telemt-bot.git /opt/telemt-bot
+# Агент будет: /opt/telemt-bot/proxy_agent.py
+```
+
+#### Шаг 2 — Проверить что работает
+
+```bash
+python3 /opt/proxy_agent.py --host 0.0.0.0 --port 8765 --token YOUR_TOKEN &
+
 # В другом терминале:
 curl "http://127.0.0.1:8765/health" -H "X-Token: YOUR_TOKEN"
-# Ожидаемый ответ: {"status": "ok"}
+# Ответ: {"status": "ok"}
 ```
 
-**Шаг 3 — Создать systemd сервис**
+#### Шаг 3 — Создать systemd-сервис
 
 ```bash
-cat > /etc/systemd/system/proxy-agent.service << EOF
+cat > /etc/systemd/system/proxy-agent.service << 'EOF'
 [Unit]
 Description=Proxy Check Agent
 After=network.target
@@ -194,34 +348,26 @@ After=network.target
 [Service]
 Type=simple
 User=root
-ExecStart=/usr/bin/python3 /root/proxy_agent.py --host IP --port 8765 --token YOUR_TOKEN
+ExecStart=/usr/bin/python3 /opt/proxy_agent.py --host 0.0.0.0 --port 8765 --token YOUR_TOKEN
 Restart=on-failure
 RestartSec=5
 
 [Install]
 WantedBy=multi-user.target
 EOF
-```
 
-> ⚠️ Замени `IP` на адрес интерфейса который доступен с основного сервера  
-> (например VPN-адрес `10.8.1.2`, или `0.0.0.0` чтобы слушать на всех).  
-> Замени `YOUR_TOKEN` на произвольный секретный токен.
-
-**Шаг 4 — Запустить и проверить**
-
-```bash
 systemctl daemon-reload
 systemctl enable --now proxy-agent
-systemctl status proxy-agent
-journalctl -u proxy-agent -f
 ```
 
-**Шаг 5 — Настроить бота**
+> Замени `0.0.0.0` на конкретный IP (например VPN-адрес `10.8.1.2`), если не нужно слушать все интерфейсы.
+
+#### Шаг 4 — Настроить бота
 
 Добавь в `.env` на основном сервере:
 
 ```env
-AGENT_1_URL=http://IP:8765
+AGENT_1_URL=http://IP_АГЕНТА:8765
 AGENT_1_NAME=RU
 AGENT_1_TOKEN=YOUR_TOKEN
 AGENT_1_FLAG=🇷🇺
@@ -233,7 +379,7 @@ AGENT_1_FLAG=🇷🇺
 systemctl restart telemt-bot
 ```
 
-После этого при проверке прокси бот будет показывать результат с обеих точек:
+При проверке прокси бот покажет результат с обеих точек:
 
 ```
 📡 Доступность:
@@ -241,51 +387,39 @@ systemctl restart telemt-bot
   🇷🇺 RU — TCP: 🟢 4 мс   |  TLS: 🟢 185 мс
 ```
 
-## Алерты
+---
 
-|Тип               |Событие                          |Cooldown|
-|------------------|---------------------------------|--------|
-|`status_down`     |Сервер недоступен                |5 мин   |
-|`status_up`       |Сервер восстановился             |—       |
-|`conn_spike`      |Всплеск соединений >50%          |2 мин   |
-|`writers_low`     |ME Writers coverage <80%         |2 мин   |
-|`version_change`  |Обновление версии telemt         |—       |
-|`bad_unknown_sni` |Неизвестный TLS SNI              |5 мин   |
-|`hs_timeout_spike`|Handshake timeout +50 за 2 мин   |2 мин   |
-|`bad_client_spike`|Плохих TLS клиентов +100 за 2 мин|2 мин   |
-|`hs_conn_reset`   |Сброс при handshake              |5 мин   |
-|`quota_warn`      |Клиент использовал ≥80% квоты    |1 час   |
-
-Настройка через `/alerts`, история через `/alert_log`.
-
-## Команды
-
-|Команда              |Описание                    |
-|---------------------|----------------------------|
-|`/menu`              |Главное меню                |
-|`/help`              |Справка                     |
-|`/adduser имя [дней]`|Быстро создать клиента      |
-|`/find запрос`       |Поиск клиента               |
-|`/alerts`            |Настройки алертов           |
-|`/alert_log`         |История последних 20 алертов|
-|`/id`                |Ваш Telegram ID             |
-
-## Зависимости
+## Структура проекта
 
 ```
-aiogram==3.27.0        # Telegram Bot API
-aiohttp==3.13.5        # HTTP-клиент
-aiosqlite==0.22.1      # SQLite
-APScheduler==3.11.2    # Планировщик задач
-matplotlib==3.10.3     # Графики (опционально)
-telethon==1.43.2       # MTProto проверка прокси (опционально)
-python-socks==2.7.1    # SOCKS для Telethon
-qrcode[pil]==8.2       # QR-коды
-Pillow==12.1.1
-openpyxl==3.1.5        # Экспорт Excel
-psutil==7.2.2          # Системная информация
-python-dotenv==1.2.2
+telemt-bot/
+├── bot.py              # Точка входа
+├── config.py           # Конфигурация из .env
+├── handlers.py         # Обработчики команд и callback
+├── keyboards.py        # Inline-клавиатуры
+├── formatters.py       # HTML-форматирование ответов
+├── charts.py           # Графики matplotlib
+├── api_client.py       # HTTP-клиент + кластерные операции
+├── database.py         # SQLite: трафик, алерты, сессии
+├── scheduler.py        # Фоновые задачи и алерты
+├── session.py          # Выбор сервера для пользователя
+├── proxy_checker.py    # Проверка MTProto прокси
+├── proxy_agent.py      # Агент проверки (только stdlib)
+├── logging_setup.py    # Цветной вывод, ротация файла
+├── tz.py               # Часовые пояса
+├── middlewares.py      # Авторизация
+├── states.py           # FSM состояния
+├── sysinfo.py          # Системная информация (psutil)
+├── qr_utils.py         # Генерация QR-кодов
+├── export_toml.py      # Бэкап telemt.toml
+├── export_utils.py     # Экспорт CSV/Excel
+├── requirements.txt
+├── pyproject.toml
+├── .env.example
+└── .gitignore
 ```
+
+---
 
 ## Лицензия
 
