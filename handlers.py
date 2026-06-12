@@ -44,7 +44,8 @@ from session import get_client, get_server_index, set_server_index
 from sysinfo import get_system_info, format_system_status
 import charts
 import proxy_checker as pc
-from states import CreateUserFSM, EditFieldFSM, QuickAddFSM, SearchUserFSM, ProxyCheckFSM, ConfigEditFSM
+from proxy_checker import format_node_result
+from states import CreateUserFSM, EditFieldFSM, QuickAddFSM, SearchUserFSM, ProxyCheckFSM, NodeCheckFSM, ConfigEditFSM
 from export_toml import router as export_toml_router
 from database import set_alert, get_alert
 
@@ -1731,6 +1732,74 @@ async def fsm_proxy_check_url(message: Message, state: FSMContext, config: Confi
     )
 
 
+# ─── /check — расширенная диагностика узла ────────────────────────────────────
+
+@router.message(Command("check"))
+async def cmd_check(message: Message, state: FSMContext):
+    """/check tg://proxy?... — полная диагностика узла"""
+    text = message.text.replace("/check", "", 1).strip()
+    if text:
+        await _do_node_check(message, state, text)
+    else:
+        await state.set_state(NodeCheckFSM.waiting_url)
+        await message.answer(
+            "🔍 <b>Диагностика узла</b>\n\n"
+            "Отправь ссылку на прокси:\n"
+            "<code>/check tg://proxy?server=HOST&port=443&secret=SECRET</code>",
+            reply_markup=_proxy_prompt_kb(),
+        )
+
+
+@router.message(NodeCheckFSM.waiting_url, F.text.regexp(r"^[^/]"))
+async def fsm_node_check_url(message: Message, state: FSMContext, config: Config):
+    await state.clear()
+    url = message.text.strip()
+    if url.startswith("/check"):
+        url = url.replace("/check", "", 1).strip()
+    await _do_node_check(message, state, url)
+
+
+async def _do_node_check(message: Message, state: FSMContext, url: str):
+    info = pc.parse_proxy_url(url)
+    if info is None:
+        await state.set_state(NodeCheckFSM.waiting_url)
+        await message.answer(
+            "❌ Не удалось распознать ссылку.\n\n"
+            "Ожидается формат:\n"
+            "<code>/check tg://proxy?server=HOST&port=443&secret=SECRET</code>",
+            reply_markup=_proxy_prompt_kb(),
+        )
+        return
+
+    wait_msg = await message.answer("⏳ Проверяю узел, подожди 2-8 секунд...")
+
+    from config import Config as _Cfg
+    # Получаем агенты из конфига (нужен uid → config)
+    config = None
+    try:
+        # Пытаемся получить конфиг через state или диспетчер
+        from session import get_client, get_server_index
+        uid = message.from_user.id
+        # Импортируем конфиг напрямую
+        from config import load_config
+        config = load_config()
+    except Exception:
+        pass
+
+    agents = config.agents if config else None
+    info = await pc.check_node_full(info, timeout=5.0, agents=agents)
+
+    try:
+        await wait_msg.delete()
+    except Exception:
+        pass
+
+    await message.answer(
+        format_node_result(info),
+        reply_markup=proxy_check_kb(),
+    )
+
+
 # ─── Config (3.4.16+) ─────────────────────────────────────────────────────────
 
 @router.callback_query(F.data == "menu:config")
@@ -1884,6 +1953,7 @@ async def cmd_help(message: Message):
         "/alerts — включить / выключить алерты\n"
         "/alert_log — история последних 20 алертов\n"
         "/id — ваш Telegram ID\n"
+        "/check tg://proxy?... — полная диагностика узла\n"
         "\n"
         "<b>Главное меню</b>\n"
         "🟢 <b>Состояние сервера</b> — dashboard: статус, uptime, версия, "

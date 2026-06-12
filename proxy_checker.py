@@ -102,6 +102,16 @@ class ProxyInfo:
     # Агенты
     agents: list[AgentResult] = field(default_factory=list)
     raw_url: str = ""
+    # Расширенная диагностика узла
+    resolved_ips: list[str] = field(default_factory=list)
+    node_tcp_ok: bool = False
+    node_tcp_rtt: float = 0.0
+    node_ssh_ok: bool = False
+    node_ssh_rtt: float = 0.0
+    node_ping_ok: bool = False
+    node_ping_rtt: float = 0.0
+    node_check_time_ms: float = 0.0
+    node_diag: str = ""
 
     # Алиасы для обратной совместимости с handlers.py
     @property
@@ -186,6 +196,19 @@ def parse_proxy_url(url: str) -> Optional[ProxyInfo]:
 
 # ─── EU проверки ─────────────────────────────────────────────────────────────
 
+async def _resolve_dns(server: str, timeout: float = 3.0) -> list[str]:
+    """Резолвит DNS и возвращает список IP-адресов."""
+    try:
+        loop = asyncio.get_running_loop()
+        ips = await asyncio.wait_for(
+            loop.getaddrinfo(server, None, family=asyncio.AddressFamily.AF_INET),
+            timeout=timeout,
+        )
+        return list(set(addr[4][0] for addr in ips))
+    except Exception:
+        return []
+
+
 async def _check_eu_tcp(info: ProxyInfo, timeout: float = 5.0):
     start = time.monotonic()
     try:
@@ -244,6 +267,112 @@ async def _check_eu_mtproto(info: ProxyInfo, timeout: float = 20.0):
             await client.disconnect()
         except Exception:
             pass
+
+
+# ─── Расширенная диагностика узла ─────────────────────────────────────────────
+
+async def _check_node_tcp(info: ProxyInfo, timeout: float = 5.0):
+    """TCP-проверка прокси-порта (аналог _check_eu_tcp, но для узла)."""
+    start = time.monotonic()
+    try:
+        _, writer = await asyncio.wait_for(
+            asyncio.open_connection(info.server, info.port),
+            timeout=timeout,
+        )
+        info.node_tcp_rtt = (time.monotonic() - start) * 1000
+        info.node_tcp_ok = True
+        writer.close()
+        try:
+            await writer.wait_closed()
+        except Exception:
+            pass
+    except asyncio.TimeoutError:
+        info.node_tcp_ok = False
+    except OSError:
+        info.node_tcp_ok = False
+
+
+async def _check_node_ssh(info: ProxyInfo, host: str, timeout: float = 3.0):
+    """TCP-проверка SSH-порта (22)."""
+    start = time.monotonic()
+    try:
+        _, writer = await asyncio.wait_for(
+            asyncio.open_connection(host, 22),
+            timeout=timeout,
+        )
+        info.node_ssh_rtt = (time.monotonic() - start) * 1000
+        info.node_ssh_ok = True
+        writer.close()
+        try:
+            await writer.wait_closed()
+        except Exception:
+            pass
+    except Exception:
+        info.node_ssh_ok = False
+
+
+async def _check_node_ping(info: ProxyInfo, host: str, timeout: float = 3.0):
+    """ICMP ping через asyncio.create_subprocess_exec."""
+    start = time.monotonic()
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            "ping", "-c", "1", "-W", str(int(timeout)), host,
+            stdout=asyncio.subprocess.DEVNULL,
+            stderr=asyncio.subprocess.DEVNULL,
+        )
+        await asyncio.wait_for(proc.wait(), timeout=timeout + 1)
+        info.node_ping_rtt = (time.monotonic() - start) * 1000
+        info.node_ping_ok = proc.returncode == 0
+    except Exception:
+        info.node_ping_ok = False
+
+
+async def check_node_full(info: ProxyInfo, timeout: float = 5.0, agents=None) -> ProxyInfo:
+    """
+    Расширенная проверка узла: DNS + TCP proxy + SSH + Ping + MTProto + агенты.
+    """
+    start_total = time.monotonic()
+
+    # DNS
+    info.resolved_ips = await _resolve_dns(info.server)
+
+    # Параллельно: TCP прокси, SSH, Ping
+    await asyncio.gather(
+        _check_node_tcp(info, timeout=timeout),
+        _check_node_ssh(info, info.server, timeout=3.0),
+        _check_node_ping(info, info.server, timeout=3.0),
+    )
+
+    # MTProto (если TCP доступен)
+    if info.node_tcp_ok:
+        await _check_eu_mtproto(info, timeout=20.0)
+        info.eu_tcp_ok = info.node_tcp_ok
+        info.eu_tcp_rtt = info.node_tcp_rtt
+
+    # Агенты (параллельно)
+    if agents:
+        agent_labels = await asyncio.gather(*[
+            _resolve_agent_label(a.url, a.flag, a.name) for a in agents
+        ])
+        agent_results = await asyncio.gather(*[
+            _check_via_agent(info, a.url, a.token, label)
+            for a, label in zip(agents, agent_labels)
+        ])
+        info.agents = list(agent_results)
+
+    info.node_check_time_ms = (time.monotonic() - start_total) * 1000
+
+    # Диагностика
+    parts = []
+    if info.eu_mtproto_ok:
+        parts.append("MTProto доступен")
+    if info.node_tcp_ok:
+        parts.append("сервис отвечает штатно")
+    if not parts:
+        parts.append("нет соединения")
+    info.node_diag = ", ".join(parts)
+
+    return info
 
 
 # ─── Агент проверки ──────────────────────────────────────────────────────────
@@ -368,5 +497,83 @@ def format_proxy_result(info: ProxyInfo) -> str:
 
     if not info.eu_tcp_ok and info.eu_error:
         lines += ["", f"❌ <b>EU ошибка:</b> <code>{info.eu_error}</code>"]
+
+    return "\n".join(lines)
+
+
+def format_node_result(info: ProxyInfo) -> str:
+    """Форматирует расширенный результат проверки узла (как на скриншоте)."""
+    type_labels = {
+        "faketls": "FakeTLS",
+        "dd":      "DD",
+        "simple":  "Simple",
+        "unknown": "Unknown",
+    }
+
+    # Итоговый статус
+    if info.eu_mtproto_ok:
+        status = "OK"
+        status_icon = "✅"
+    elif info.node_tcp_ok:
+        status = "TCP OK"
+        status_icon = "🟡"
+    else:
+        status = "FAIL"
+        status_icon = "❌"
+
+    lines = [
+        f"{status_icon} <b>Проверка узла {info.server}</b> ({', '.join(info.resolved_ips) if info.resolved_ips else 'DNS: ?'})",
+        "",
+    ]
+
+    # Resolved IPs
+    if info.resolved_ips:
+        lines.append(f"  Resolved ips: {', '.join(info.resolved_ips)}")
+        lines.append("")
+
+    # MTProto
+    mtp_icon = "✅" if info.eu_mtproto_ok else "❌"
+    mtp_status = "доступен" if info.eu_mtproto_ok else "недоступен"
+    lines.append(f"  {mtp_icon} MTProto ({info.port}): {mtp_status}")
+
+    # TCP proxy
+    tcp_icon = "✅" if info.node_tcp_ok else "❌"
+    tcp_status = "доступен" if info.node_tcp_ok else "недоступен"
+    lines.append(f"  {tcp_icon} TCP proxy ({info.port}): {tcp_status}")
+
+    # TCP SSH
+    ssh_icon = "✅" if info.node_ssh_ok else "❌"
+    ssh_status = "доступен" if info.node_ssh_ok else "недоступен"
+    lines.append(f"  {ssh_icon} TCP SSH (22): {ssh_status}")
+
+    # Ping
+    ping_icon = "✅" if info.node_ping_ok else "❌"
+    ping_status = "доступен" if info.node_ping_ok else "недоступен"
+    lines.append(f"  {ping_icon} Ping: {ping_status}")
+
+    lines.append("")
+
+    # Диагностика
+    diag_icon = "✅" if info.eu_mtproto_ok else "⚠️"
+    lines.append(f"  {diag_icon} Диагностика: {info.node_diag}")
+
+    # Время проверки
+    lines.append(f"  ⏱ Время проверки: {info.node_check_time_ms:.0f} ms")
+
+    # Итоговый статус
+    lines.append(f"  {status_icon} Итоговый статус: {status}")
+
+    # Агенты (если есть)
+    if info.agents:
+        lines += ["", "<b>📡 Агенты:</b>"]
+        for ar in info.agents:
+            tcp_icon = "🟢" if ar.tcp_ok else "🔴"
+            tcp_rtt = f"{ar.tcp_rtt:.0f} мс" if ar.tcp_ok else f"<i>{ar.tcp_error or '—'}</i>"
+            line = f"  {ar.label} — TCP: {tcp_icon} {tcp_rtt}"
+            if ar.tcp_ok:
+                tls_icon = "🟢" if ar.tls_ok else "🔴"
+                tls_rtt = f"{ar.tls_rtt:.0f} мс" if ar.tls_ok else "—"
+                line += f"  |  TLS: {tls_icon} {tls_rtt}"
+            lines.append(line)
 
     return "\n".join(lines)
