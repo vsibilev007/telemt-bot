@@ -1670,11 +1670,10 @@ async def cb_proxy_check_menu(cq: CallbackQuery, state: FSMContext):
     await state.set_state(ProxyCheckFSM.waiting_url)
     await cq.answer()
     await cq.message.answer(
-        "🔍 <b>Проверка MTProto прокси</b>\n\n"
-        "Отправь ссылку на прокси в формате:\n"
+        "🔍 <b>Проверка узла</b>\n\n"
+        "Отправь ссылку на прокси:\n"
         "<code>tg://proxy?server=HOST&port=443&secret=SECRET</code>\n\n"
-        "или нажми кнопку «Подключиться» в любом канале — "
-        "скопируй ссылку и отправь сюда.",
+        "Проверка: DNS, TCP, SSH, Ping, MTProto",
         reply_markup=_proxy_prompt_kb(),
     )
 
@@ -1713,10 +1712,9 @@ async def fsm_proxy_check_url(message: Message, state: FSMContext, config: Confi
         )
         return
 
-    wait_msg = await message.answer("⏳ Проверяю прокси...")
-    info = await pc.check_proxy(
-        info,
-        timeout=5.0,
+    wait_msg = await message.answer("⏳ Проверяю узел, подожди 2-8 секунд...")
+    info = await pc.check_node_full(
+        info, timeout=5.0,
         agents=config.agents if config.agents else None,
     )
 
@@ -1725,9 +1723,8 @@ async def fsm_proxy_check_url(message: Message, state: FSMContext, config: Confi
     except Exception:
         pass
 
-    # Только после результата показываем кнопки «Проверить ещё» и «Меню»
     await message.answer(
-        pc.format_proxy_result(info),
+        pc.format_node_result(info),
         reply_markup=proxy_check_kb(),
     )
 
