@@ -816,13 +816,21 @@ def format_config(d: dict) -> str:
                     for k2, v2 in v.items():
                         lines.append(f"    {k2}: {v2}")
                 elif isinstance(v, list):
-                    lines.append(f"  {k}: {v}")
+                    val_str = str(v)
+                    if len(val_str) > 80:
+                        val_str = val_str[:77] + "..."
+                    lines.append(f"  {k}: {val_str}")
                 else:
                     lines.append(f"  {k}: {v}")
         else:
             lines.append(f"  {section_data}")
         lines.append("")
 
-    return "\n".join(lines)
+    # Telegram message limit: 4096 chars
+    result = "\n".join(lines)
+    if len(result) > 4000:
+        result = result[:3997] + "..."
+
+    return result
 
 
