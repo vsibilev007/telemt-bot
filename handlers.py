@@ -28,13 +28,13 @@ from formatters import (
     format_runtime_gates, format_runtime_init, format_security_posture,
     format_security_whitelist, format_tls_fingerprints, format_upstream_quality,
     format_upstreams, format_user_detail, format_user_list, format_user_links,
-    format_users_quota, fmt_bytes,
+    format_users_quota, fmt_bytes, format_config,
 )
 from keyboards import (
     alerts_kb, dashboard_kb, dcs_kb, dcs_sub_kb, export_menu_kb,
     main_menu_kb, runtime_kb, runtime_sub_kb, security_kb, security_sub_kb,
     sysinfo_kb, traffic_period_kb, traffic_report_kb, upstreams_kb,
-    proxy_check_kb,
+    proxy_check_kb, config_kb, config_sub_kb,
     user_delete_confirm_kb, user_detail_kb, user_edit_kb,
     user_links_kb, user_links_kb_no_links, users_delete_expired_confirm_kb,
     users_extra_kb, users_list_kb,
@@ -44,7 +44,7 @@ from session import get_client, get_server_index, set_server_index
 from sysinfo import get_system_info, format_system_status
 import charts
 import proxy_checker as pc
-from states import CreateUserFSM, EditFieldFSM, QuickAddFSM, SearchUserFSM, ProxyCheckFSM
+from states import CreateUserFSM, EditFieldFSM, QuickAddFSM, SearchUserFSM, ProxyCheckFSM, ConfigEditFSM
 from export_toml import router as export_toml_router
 from database import set_alert, get_alert
 
@@ -794,6 +794,38 @@ async def cb_user_toggle(cq: CallbackQuery, config: Config):
         format_user_detail(user),
         reply_markup=user_detail_kb(username, enabled=user.get("enabled", None)),
     )
+
+
+# ─── Reset quota (3.4.11+) ─────────────────────────────────────────────────────
+
+@router.callback_query(F.data.startswith("user:reset_quota:"))
+async def cb_user_reset_quota(cq: CallbackQuery, config: Config):
+    username = cq.data.split(":")[2]
+    client, srv = await get_client(_uid(cq), config)
+    members = config.get_group_members(srv)
+
+    try:
+        results = await cluster_write(members, "reset_user_quota", username)
+    except Exception as e:
+        await cq.answer(f"❌ Ошибка: {e}", show_alert=True)
+        return
+
+    if _all_ok(results):
+        await cq.answer("✅ Квота сброшена")
+    else:
+        errors = _format_cluster_result([r for r in results if not r.ok])
+        await cq.answer(f"⚠️ Ошибка на узлах:\n{errors}", show_alert=True)
+        return
+
+    try:
+        user = await cluster_read(members, "get_user", username)
+        await _safe_edit(
+            cq,
+            f"✅ Квота <b>{username}</b> сброшена\n\n" + format_user_detail(user),
+            reply_markup=user_detail_kb(username, enabled=user.get("enabled", None)),
+        )
+    except Exception:
+        await _safe_edit(cq, f"✅ Квота <b>{username}</b> сброшена")
 
 
 # ─── Traffic history ──────────────────────────────────────────────────────────
@@ -1699,6 +1731,23 @@ async def fsm_proxy_check_url(message: Message, state: FSMContext, config: Confi
     )
 
 
+# ─── Config (3.4.16+) ─────────────────────────────────────────────────────────
+
+@router.callback_query(F.data == "menu:config")
+async def cb_config_menu(cq: CallbackQuery):
+    await _safe_edit(cq, "<b>⚙️ Конфигурация</b>\n\nПросмотр текущего конфига:", reply_markup=config_kb())
+
+
+@router.callback_query(F.data.in_({"config:view", "config:refresh"}))
+async def cb_config_view(cq: CallbackQuery, config: Config):
+    client, srv = await get_client(_uid(cq), config)
+    try:
+        data = await client.get_config()
+        await _safe_edit(cq, format_config(data), reply_markup=config_sub_kb("refresh"))
+    except ApiError as e:
+        await _safe_edit(cq, f"❌ Ошибка: {e}", reply_markup=config_sub_kb("refresh"))
+
+
 # ─── Alerts / Help ────────────────────────────────────────────────────────────
 
 #@router.message(Command("alerts"))
@@ -1851,10 +1900,11 @@ async def cmd_help(message: Message):
         "🔗 <b>Upstreams</b> — RTT и статус апстримов\n"
         "📡 <b>DC / Writers</b> — статус датацентров и ME Writers\n"
         "📤 <b>Бэкап</b> — выгрузка <code>telemt.toml</code> файлом в чат\n"
+        "⚙️ <b>Конфигурация</b> — просмотр текущего конфига (3.4.16+)\n"
         "\n"
         "<b>Карточка клиента</b>\n"
-        "Редактирование полей • смена секрета • 📊 история трафика "
-        "с 📈 графиком (24ч / 7 / 14 / 30 дней) • QR-коды ссылок\n"
+        "Редактирование полей • смена секрета • 🔄 сброс квоты • "
+        "📊 история трафика с 📈 графиком (24ч / 7 / 14 / 30 дней) • QR-коды ссылок\n"
         "\n"
         "<b>Алерты</b> — 9 типов:\n"
         "падение / восстановление сервера • всплеск соединений • "

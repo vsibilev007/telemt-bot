@@ -764,3 +764,31 @@ def format_tls_fingerprints(d: dict) -> str:
     return "\n".join(lines)
 
 
+# ─── Config (3.4.16+) ─────────────────────────────────────────────────────────
+
+def format_config(d: dict) -> str:
+    """Форматирует ответ GET /v1/config — TOML-текст конфигурации."""
+    toml_text = d.get("config", "")
+    if not toml_text:
+        return "<b>⚙️ Конфигурация</b>\n\n❌ Пустой ответ"
+
+    lines = [
+        "<b>⚙️ Конфигурация</b>",
+        "",
+        "<code>",
+    ]
+
+    for line in toml_text.split("\n")[:80]:
+        lines.append(line)
+
+    if toml_text.count("\n") > 80:
+        lines.append(f"… (ещё {toml_text.count(chr(10)) - 80} строк)")
+
+    lines += [
+        "</code>",
+        "",
+        "<i>Для редактирования отправьте TOML-файл</i>",
+    ]
+    return "\n".join(lines)
+
+

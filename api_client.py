@@ -152,6 +152,18 @@ class TelemetClient:
     async def delete_user(self, username: str) -> Any:
         return await self._request("DELETE", f"/users/{username}")
 
+    async def reset_user_quota(self, username: str) -> dict:
+        """POST /v1/users/{username}/reset-quota (3.4.11+)"""
+        return await self._request("POST", f"/users/{username}/reset-quota")
+
+    async def get_config(self) -> dict:
+        """GET /v1/config (3.4.16+)"""
+        return await self._request("GET", "/config")
+
+    async def patch_config(self, payload: dict, if_match: str = "") -> dict:
+        """PATCH /v1/config (3.4.16+)"""
+        return await self._request("PATCH", "/config", json=payload, if_match=if_match or None)
+
     async def get_runtime_tls_fingerprints(self, limit: int = 100) -> dict:
         """GET /v1/runtime/tls-fingerprints?limit=N (3.4.14+)"""
         return await self._request("GET", f"/runtime/tls-fingerprints?limit={limit}")

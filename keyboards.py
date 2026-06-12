@@ -54,8 +54,9 @@ def main_menu_kb(
         kb.button(text="📡 DC / Writers",       callback_data="menu:dcs")
         kb.button(text="📤 Бэкап",              callback_data="users:export_toml")
         kb.button(text="🔍 Проверить прокси",   callback_data="menu:proxy_check")
-        n_main = 11
-        schema_base = [2, 2, 2, 2, 2, 1]
+        kb.button(text="⚙️ Конфигурация",       callback_data="menu:config")
+        n_main = 12
+        schema_base = [2, 2, 2, 2, 2, 2]
 
     # Переключатель серверов
     menu_servers = config.get_menu_servers() if config else servers
@@ -174,6 +175,7 @@ def user_detail_kb(username: str, enabled: bool = True) -> InlineKeyboardMarkup:
     kb.button(text=toggle_text,            callback_data=f"user:toggle:{username}:{toggle_action}")
     kb.button(text="🔗 Ссылки",           callback_data=f"user:links:{username}")
     kb.button(text="🔄 Сменить секрет",   callback_data=f"user:rotate_secret:{username}")
+    kb.button(text="🔄 Сбросить квоту",   callback_data=f"user:reset_quota:{username}")
     kb.button(text="📊 История трафика",  callback_data=f"user:traffic:{username}")
     kb.button(text="🔄 Обновить",         callback_data=f"user:view:{username}")
     kb.button(text="◀️ К списку",         callback_data="menu:users")
@@ -378,6 +380,22 @@ def proxy_check_kb() -> InlineKeyboardMarkup:
     kb.button(text="🔍 Проверить ещё", callback_data="proxy:check_again")
     kb.button(text="◀️ Меню",          callback_data="menu:main")
     kb.adjust(1)
+    return kb.as_markup()
+
+
+def config_kb() -> InlineKeyboardMarkup:
+    kb = InlineKeyboardBuilder()
+    kb.button(text="👁️ Просмотр",  callback_data="config:view")
+    kb.button(text="◀️ Меню",      callback_data="menu:main")
+    kb.adjust(2)
+    return kb.as_markup()
+
+
+def config_sub_kb(section: str) -> InlineKeyboardMarkup:
+    kb = InlineKeyboardBuilder()
+    kb.button(text="🔄 Обновить", callback_data=f"config:{section}")
+    kb.button(text="◀️ Меню",     callback_data="menu:main")
+    kb.adjust(2)
     return kb.as_markup()
 
 

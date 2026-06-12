@@ -25,3 +25,7 @@ class SearchUserFSM(StatesGroup):
 
 class ProxyCheckFSM(StatesGroup):
     waiting_url = State()
+
+
+class ConfigEditFSM(StatesGroup):
+    waiting_toml = State()
