@@ -131,8 +131,8 @@ def _uid(event) -> int:
 async def _safe_edit(cq: CallbackQuery, text: str, reply_markup=None):
     try:
         await cq.message.edit_text(text, reply_markup=reply_markup)
-    except Exception:
-        pass
+    except Exception as e:
+        logger.debug("_safe_edit: %s", e)
     await cq.answer()
 
 
@@ -1815,6 +1815,9 @@ async def cb_config_view(cq: CallbackQuery, config: Config):
         await _safe_edit(cq, format_config(data), reply_markup=config_sub_kb("refresh"))
     except ApiError as e:
         await _safe_edit(cq, f"❌ Ошибка: {e}", reply_markup=config_sub_kb("refresh"))
+    except Exception as e:
+        logger.exception("cb_config_view error")
+        await _safe_edit(cq, f"❌ Ошибка: {type(e).__name__}: {e}", reply_markup=config_sub_kb("refresh"))
 
 
 # ─── Alerts / Help ────────────────────────────────────────────────────────────
