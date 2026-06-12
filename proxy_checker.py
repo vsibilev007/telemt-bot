@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import socket
 import time
 import urllib.parse
 from dataclasses import dataclass, field
@@ -197,16 +198,30 @@ def parse_proxy_url(url: str) -> Optional[ProxyInfo]:
 # ─── EU проверки ─────────────────────────────────────────────────────────────
 
 async def _resolve_dns(server: str, timeout: float = 3.0) -> list[str]:
-    """Резолвит DNS и возвращает список IP-адресов."""
+    """Резолвит DNS и возвращает список IP-адресов (IPv4 + IPv6)."""
     try:
         loop = asyncio.get_running_loop()
-        ips = await asyncio.wait_for(
-            loop.getaddrinfo(server, None, family=asyncio.AddressFamily.AF_INET),
+        # Пробуем IPv4
+        ipv4 = await asyncio.wait_for(
+            loop.getaddrinfo(server, None, family=socket.AF_INET),
             timeout=timeout,
         )
-        return list(set(addr[4][0] for addr in ips))
+        ips = [addr[4][0] for addr in ipv4]
     except Exception:
-        return []
+        ips = []
+
+    try:
+        loop = asyncio.get_running_loop()
+        # Пробуем IPv6
+        ipv6 = await asyncio.wait_for(
+            loop.getaddrinfo(server, None, family=socket.AF_INET6),
+            timeout=timeout,
+        )
+        ips += [addr[4][0] for addr in ipv6]
+    except Exception:
+        pass
+
+    return list(dict.fromkeys(ips))  # dedupe, preserving order
 
 
 async def _check_eu_tcp(info: ProxyInfo, timeout: float = 5.0):
@@ -333,8 +348,8 @@ async def check_node_full(info: ProxyInfo, timeout: float = 5.0, agents=None) ->
     """
     start_total = time.monotonic()
 
-    # DNS
-    info.resolved_ips = await _resolve_dns(info.server)
+    # DNS (параллельно с остальным)
+    dns_task = asyncio.create_task(_resolve_dns(info.server))
 
     # Параллельно: TCP прокси, SSH, Ping
     await asyncio.gather(
@@ -342,6 +357,9 @@ async def check_node_full(info: ProxyInfo, timeout: float = 5.0, agents=None) ->
         _check_node_ssh(info, info.server, timeout=3.0),
         _check_node_ping(info, info.server, timeout=3.0),
     )
+
+    # Ждём DNS
+    info.resolved_ips = await dns_task
 
     # MTProto (если TCP доступен)
     if info.node_tcp_ok:
@@ -362,14 +380,17 @@ async def check_node_full(info: ProxyInfo, timeout: float = 5.0, agents=None) ->
 
     info.node_check_time_ms = (time.monotonic() - start_total) * 1000
 
-    # Диагностика
+    # Диагностика — честная
     parts = []
     if info.eu_mtproto_ok:
         parts.append("MTProto доступен")
     if info.node_tcp_ok:
-        parts.append("сервис отвечает штатно")
+        if info.eu_mtproto_ok:
+            parts.append("сервис отвечает штатно")
+        else:
+            parts.append("TCP доступен, но MTProto не работает")
     if not parts:
-        parts.append("нет соединения")
+        parts.append("нет соединения с узлом")
     info.node_diag = ", ".join(parts)
 
     return info
@@ -515,7 +536,7 @@ def format_node_result(info: ProxyInfo) -> str:
         status = "OK"
         status_icon = "✅"
     elif info.node_tcp_ok:
-        status = "TCP OK"
+        status = "PARTIAL"
         status_icon = "🟡"
     else:
         status = "FAIL"
