@@ -28,13 +28,13 @@ from formatters import (
     format_runtime_gates, format_runtime_init, format_security_posture,
     format_security_whitelist, format_tls_fingerprints, format_upstream_quality,
     format_upstreams, format_user_detail, format_user_list, format_user_links,
-    format_users_quota, fmt_bytes, format_config,
+    format_users_quota, fmt_bytes,
 )
 from keyboards import (
     alerts_kb, dashboard_kb, dcs_kb, dcs_sub_kb, export_menu_kb,
     main_menu_kb, runtime_kb, runtime_sub_kb, security_kb, security_sub_kb,
     sysinfo_kb, traffic_period_kb, traffic_report_kb, upstreams_kb,
-    proxy_check_kb, config_kb, config_sub_kb,
+    proxy_check_kb,
     user_delete_confirm_kb, user_detail_kb, user_edit_kb,
     user_links_kb, user_links_kb_no_links, users_delete_expired_confirm_kb,
     users_extra_kb, users_list_kb,
@@ -45,7 +45,7 @@ from sysinfo import get_system_info, format_system_status
 import charts
 import proxy_checker as pc
 from proxy_checker import format_node_result
-from states import CreateUserFSM, EditFieldFSM, QuickAddFSM, SearchUserFSM, ProxyCheckFSM, NodeCheckFSM, ConfigEditFSM
+from states import CreateUserFSM, EditFieldFSM, QuickAddFSM, SearchUserFSM, ProxyCheckFSM, NodeCheckFSM
 from export_toml import router as export_toml_router
 from database import set_alert, get_alert
 
@@ -1800,26 +1800,6 @@ async def _do_node_check(message: Message, state: FSMContext, url: str):
     )
 
 
-# ─── Config (3.4.16+) ─────────────────────────────────────────────────────────
-
-@router.callback_query(F.data == "menu:config")
-async def cb_config_menu(cq: CallbackQuery):
-    await _safe_edit(cq, "<b>⚙️ Конфигурация</b>\n\nПросмотр текущего конфига:", reply_markup=config_kb())
-
-
-@router.callback_query(F.data.in_({"config:view", "config:refresh"}))
-async def cb_config_view(cq: CallbackQuery, config: Config):
-    client, srv = await get_client(_uid(cq), config)
-    try:
-        data = await client.get_config()
-        await _safe_edit(cq, format_config(data), reply_markup=config_sub_kb("refresh"))
-    except ApiError as e:
-        await _safe_edit(cq, f"❌ Ошибка: {e}", reply_markup=config_sub_kb("refresh"))
-    except Exception as e:
-        logger.exception("cb_config_view error")
-        await _safe_edit(cq, f"❌ Ошибка: {type(e).__name__}: {e}", reply_markup=config_sub_kb("refresh"))
-
-
 # ─── Alerts / Help ────────────────────────────────────────────────────────────
 
 #@router.message(Command("alerts"))
@@ -1972,8 +1952,7 @@ async def cmd_help(message: Message):
         "🔒 <b>Безопасность</b> — Posture, IP Whitelist, Effective Limits\n"
         "🔗 <b>Upstreams</b> — RTT и статус апстримов\n"
         "📡 <b>DC / Writers</b> — статус датацентров и ME Writers\n"
-        "📤 <b>Бэкап</b> — выгрузка <code>telemt.toml</code> файлом в чат\n"
-        "⚙️ <b>Конфигурация</b> — просмотр текущего конфига (3.4.16+)\n"
+        "📤 <b>Бэкап</b> — выгрузка <code>telemt.toml</code> файлом в чат (через API)\n"
         "\n"
         "<b>Карточка клиента</b>\n"
         "Редактирование полей • смена секрета • 🔄 сброс квоты • "
