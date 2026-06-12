@@ -766,29 +766,63 @@ def format_tls_fingerprints(d: dict) -> str:
 
 # ─── Config (3.4.16+) ─────────────────────────────────────────────────────────
 
+def _fmt_config_value(v, indent: int = 2) -> list[str]:
+    """Рекурсивно форматирует значение конфига для вывода."""
+    prefix = " " * indent
+    lines = []
+    if isinstance(v, dict):
+        for k2, v2 in v.items():
+            if isinstance(v2, dict):
+                lines.append(f"{prefix}{k2}: {{...}}")
+                lines += _fmt_config_value(v2, indent + 2)
+            elif isinstance(v2, list):
+                lines.append(f"{prefix}{k2}: {v2}")
+            else:
+                lines.append(f"{prefix}{k2}: {v2}")
+    else:
+        lines.append(f"{prefix}{v}")
+    return lines
+
+
 def format_config(d: dict) -> str:
-    """Форматирует ответ GET /v1/config — TOML-текст конфигурации."""
-    toml_text = d.get("config", "")
-    if not toml_text:
+    """Форматирует ответ GET /v1/config — JSON-секции конфигурации."""
+    if not d:
         return "<b>⚙️ Конфигурация</b>\n\n❌ Пустой ответ"
 
-    lines = [
-        "<b>⚙️ Конфигурация</b>",
-        "",
-        "<code>",
-    ]
+    revision = d.get("revision", "")
+    editable = ["general", "timeouts", "censorship", "upstreams", "show_link", "dc_overrides"]
 
-    for line in toml_text.split("\n")[:80]:
-        lines.append(line)
+    sections = []
+    for section in editable:
+        if section in d:
+            sections.append((section, d[section]))
 
-    if toml_text.count("\n") > 80:
-        lines.append(f"… (ещё {toml_text.count(chr(10)) - 80} строк)")
+    if not sections:
+        return "<b>⚙️ Конфигурация</b>\n\n❌ Нет редактируемых секций"
 
-    lines += [
-        "</code>",
-        "",
-        "<i>Для редактирования отправьте TOML-файл</i>",
-    ]
+    lines = ["<b>⚙️ Конфигурация</b>"]
+
+    if revision:
+        lines.append(f"<i>revision: {revision[:12]}…</i>")
+
+    lines.append("")
+
+    for section_name, section_data in sections:
+        lines.append(f"<b>[{section_name}]</b>")
+        if isinstance(section_data, dict):
+            for k, v in section_data.items():
+                if isinstance(v, dict):
+                    lines.append(f"  {k}: {{...}}")
+                    for k2, v2 in v.items():
+                        lines.append(f"    {k2}: {v2}")
+                elif isinstance(v, list):
+                    lines.append(f"  {k}: {v}")
+                else:
+                    lines.append(f"  {k}: {v}")
+        else:
+            lines.append(f"  {section_data}")
+        lines.append("")
+
     return "\n".join(lines)
 
 
