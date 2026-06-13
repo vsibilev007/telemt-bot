@@ -1949,6 +1949,20 @@ async def cb_config_edit_field(cq: CallbackQuery, state: FSMContext):
     await _safe_edit(cq, f"✏️ <b>{field}</b>\n\nТекущее: <code>{current}</code>\n<i>{hint}</i>\n\nОтправь новое значение или /skip:")
 
 
+@router.message(ConfigEditFSM.waiting_value, Command("skip"))
+async def fsm_config_edit_skip(message: Message, state: FSMContext):
+    """/skip — отмена и возврат в меню конфигурации."""
+    await state.clear()
+    uid = message.from_user.id
+    data = _config_edit_cache.get(uid, {})
+    revision = data.get("revision", "")
+    header = "<b>⚙️ Редактирование конфига</b>\n"
+    if revision:
+        header += f"<i>revision: {revision[:12]}…</i>"
+    header += "\n\nВыберите секцию:"
+    await message.answer(header, reply_markup=config_edit_sections_kb())
+
+
 @router.message(ConfigEditFSM.waiting_value, F.text.regexp(r"^[^/]"))
 async def fsm_config_edit_value(message: Message, state: FSMContext, config: Config):
     """Применить новое значение поля."""
@@ -1957,17 +1971,6 @@ async def fsm_config_edit_value(message: Message, state: FSMContext, config: Con
     field = data.get("field", "")
     value_str = message.text.strip()
     await state.clear()
-
-    if value_str == "/skip":
-        uid = message.from_user.id
-        data = _config_edit_cache.get(uid, {})
-        revision = data.get("revision", "")
-        header = "<b>⚙️ Редактирование конфига</b>\n"
-        if revision:
-            header += f"<i>revision: {revision[:12]}…</i>"
-        header += "\n\nВыберите секцию:"
-        await message.answer(header, reply_markup=config_edit_sections_kb())
-        return
 
     # Парсим значение
     value = _parse_config_value(value_str)
