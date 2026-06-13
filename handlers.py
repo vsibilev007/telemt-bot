@@ -35,6 +35,7 @@ from keyboards import (
     main_menu_kb, runtime_kb, runtime_sub_kb, security_kb, security_sub_kb,
     sysinfo_kb, traffic_period_kb, traffic_report_kb, upstreams_kb,
     proxy_check_kb,
+    config_edit_sections_kb, config_edit_fields_kb, config_edit_confirm_kb, CONFIG_SECTIONS,
     user_delete_confirm_kb, user_detail_kb, user_edit_kb,
     user_links_kb, user_links_kb_no_links, users_delete_expired_confirm_kb,
     users_extra_kb, users_list_kb,
@@ -45,7 +46,7 @@ from sysinfo import get_system_info, format_system_status
 import charts
 import proxy_checker as pc
 from proxy_checker import format_node_result
-from states import CreateUserFSM, EditFieldFSM, QuickAddFSM, SearchUserFSM, ProxyCheckFSM, NodeCheckFSM
+from states import CreateUserFSM, EditFieldFSM, QuickAddFSM, SearchUserFSM, ProxyCheckFSM, NodeCheckFSM, ConfigEditFSM
 from export_toml import router as export_toml_router
 from database import set_alert, get_alert
 
@@ -1795,6 +1796,300 @@ async def _do_node_check(message: Message, state: FSMContext, url: str):
         format_node_result(info),
         reply_markup=proxy_check_kb(),
     )
+
+
+# ─── Config edit (PATCH /v1/config) ───────────────────────────────────────────
+
+# Поля доступные для редактирования в каждой секции
+CONFIG_FIELDS = {
+    "general": [
+        "log_level", "beobachten", "use_middle_proxy", "me2dc_fallback", "me2dc_fast",
+        "me_keepalive_enabled", "me_keepalive_interval_secs", "me_floor_mode",
+        "me_writer_pick_mode", "update_every", "me_reinit_every_secs",
+    ],
+    "timeouts": [
+        "client_handshake", "client_first_byte_idle_secs", "client_keepalive",
+        "client_ack", "tg_connect", "me_one_retry", "me_one_timeout_ms",
+    ],
+    "censorship": [
+        "tls_domain", "tls_domains", "mask", "mask_host", "mask_port",
+        "tls_emulation", "tls_front_dir", "tls_full_cert_ttl_secs",
+        "alpn_enforce", "unknown_sni_action",
+    ],
+    "upstreams": [],  # Массив — редактируется как целое
+    "show_link": [],  # Массив
+    "dc_overrides": {},  # Dict
+}
+
+# Кэш текущего конфига для пользователя
+_config_edit_cache: dict[int, dict] = {}
+
+
+@router.callback_query(F.data == "menu:config_edit")
+async def cb_config_edit_menu(cq: CallbackQuery, config: Config):
+    """Показать список секций для редактирования."""
+    client, srv = await get_client(_uid(cq), config)
+    try:
+        data = await client.get_config()
+    except ApiError as e:
+        await _safe_edit(cq, f"❌ Ошибка: {e}")
+        return
+    except Exception as e:
+        logger.exception("cb_config_edit_menu error")
+        await _safe_edit(cq, f"❌ Ошибка: {type(e).__name__}: {e}")
+        return
+
+    _config_edit_cache[_uid(cq)] = data
+    revision = data.get("revision", "")
+    header = "<b>⚙️ Редактирование конфига</b>\n"
+    if revision:
+        header += f"<i>revision: {revision[:12]}…</i>"
+    header += "\n\nВыберите секцию:"
+
+    await _safe_edit(cq, header, reply_markup=config_edit_sections_kb())
+
+
+@router.callback_query(F.data == "configedit:menu")
+async def cb_config_edit_back(cq: CallbackQuery):
+    """Вернуться к списку секций."""
+    uid = _uid(cq)
+    data = _config_edit_cache.get(uid, {})
+    revision = data.get("revision", "")
+    header = "<b>⚙️ Редактирование конфига</b>\n"
+    if revision:
+        header += f"<i>revision: {revision[:12]}…</i>"
+    header += "\n\nВыберите секцию:"
+    await _safe_edit(cq, header, reply_markup=config_edit_sections_kb())
+
+
+@router.callback_query(F.data.startswith("configedit:section:"))
+async def cb_config_edit_section(cq: CallbackQuery, state: FSMContext):
+    """Показать поля секции."""
+    section = cq.data.split(":")[2]
+    uid = _uid(cq)
+    data = _config_edit_cache.get(uid, {})
+    section_data = data.get(section, {})
+
+    # Для вложенных секций
+    if section_data is None and "." in section:
+        parent, child = section.rsplit(".", 1)
+        parent_data = data.get(parent, {})
+        if isinstance(parent_data, dict):
+            section_data = parent_data.get(child, {})
+
+    fields = CONFIG_FIELDS.get(section)
+
+    # Для секций-массивов/словарей — показать как целое
+    if fields == [] or fields is {}:
+        text = f"<b>⚙️ [{section}]</b>\n\n"
+        if isinstance(section_data, list):
+            text += f"Текущее значение:\n<code>{section_data}</code>\n\n"
+            text += "Отправь новое значение (JSON-массив):"
+        elif isinstance(section_data, dict):
+            text += f"Текущее значение:\n<code>{section_data}</code>\n\n"
+            text += "Отправь новое значение (JSON-объект):"
+        else:
+            text += f"Текущее значение: <code>{section_data}</code>\n\n"
+            text += "Отправь новое значение:"
+        await state.set_state(ConfigEditFSM.waiting_value)
+        await state.update_data(section=section, field="__raw__")
+        await _safe_edit(cq, text)
+        return
+
+    if not fields:
+        await _safe_edit(cq, f"⚙️ [{section}]\n\n❌ Нет полей для редактирования")
+        return
+
+    # Показать текущие значения полей
+    await _safe_edit(
+        cq,
+        f"<b>⚙️ [{section}]</b>\n\nВыберите поле:",
+        reply_markup=config_edit_fields_kb(section, fields, section_data if isinstance(section_data, dict) else {}),
+    )
+
+
+@router.callback_query(F.data.startswith("configedit:field:"))
+async def cb_config_edit_field(cq: CallbackQuery, state: FSMContext):
+    """Запрос нового значения для поля."""
+    parts = cq.data.split(":")
+    section, field = parts[2], parts[3]
+
+    uid = _uid(cq)
+    data = _config_edit_cache.get(uid, {})
+    section_data = data.get(section, {})
+    if isinstance(section_data, dict):
+        current = section_data.get(field, "—")
+    else:
+        current = "—"
+
+    hints = {
+        "log_level": "debug / normal / silent",
+        "beobachten": "true / false",
+        "use_middle_proxy": "true / false",
+        "me2dc_fallback": "true / false",
+        "me2dc_fast": "true / false",
+        "me_keepalive_enabled": "true / false",
+        "tls_domain": "домен или пустая строка",
+        "tls_domains": '["domain1.com", "domain2.com"] или []',
+        "mask": "true / false",
+        "mask_host": "хост или пустая строка",
+        "mask_port": "число (например 443)",
+        "tls_emulation": "true / false",
+        "alpn_enforce": "true / false",
+        "unknown_sni_action": "drop / pass",
+        "client_handshake": "секунды (например 60)",
+        "client_keepalive": "секунды (например 15)",
+        "client_ack": "секунды (например 90)",
+        "tg_connect": "секунды (например 10)",
+    }
+    hint = hints.get(field, "значение")
+
+    await state.set_state(ConfigEditFSM.waiting_value)
+    await state.update_data(section=section, field=field)
+    await _safe_edit(cq, f"✏️ <b>{field}</b>\n\nТекущее: <code>{current}</code>\n<i>{hint}</i>\n\nОтправь новое значение или /skip:")
+
+
+@router.message(ConfigEditFSM.waiting_value, F.text.regexp(r"^[^/]"))
+async def fsm_config_edit_value(message: Message, state: FSMContext, config: Config):
+    """Применить новое значение поля."""
+    data = await state.get_data()
+    section = data["section"]
+    field = data.get("field", "")
+    value_str = message.text.strip()
+    await state.clear()
+
+    if value_str == "/skip":
+        await message.answer("⏭ Без изменений. /menu")
+        return
+
+    # Парсим значение
+    value = _parse_config_value(value_str)
+
+    # Применяем через API
+    uid = message.from_user.id
+    cache = _config_edit_cache.get(uid, {})
+    revision = cache.get("revision", "")
+
+    if field == "__raw__":
+        patch = {section: value}
+    else:
+        patch = {section: {field: value}}
+
+    client, srv = await get_client(uid, config)
+    try:
+        result = await client.patch_config(patch, if_match=revision)
+    except ApiError as e:
+        # Повторный ввод при ошибке API
+        await state.set_state(ConfigEditFSM.waiting_value)
+        await state.update_data(section=section, field=field)
+        await message.answer(
+            f"❌ <b>Ошибка:</b> {e}\n\n"
+            f"Попробуй ещё раз или /skip для отмены:"
+        )
+        return
+    except Exception as e:
+        await state.set_state(ConfigEditFSM.waiting_value)
+        await state.update_data(section=section, field=field)
+        await message.answer(
+            f"❌ <b>Ошибка:</b> {type(e).__name__}: {e}\n\n"
+            f"Попробуй ещё раз или /skip для отмены:"
+        )
+        return
+
+    new_rev = result.get("revision", "")
+    restart = result.get("restart_required", False)
+    changed = result.get("changed", [])
+
+    text = "✅ Конфиг обновлён\n"
+    if new_rev:
+        text += f"revision: <code>{new_rev[:12]}…</code>\n"
+    if changed:
+        text += f"Изменено: {', '.join(changed)}\n"
+    if restart:
+        text += "\n⚠️ Требуется перезапуск Telemt!"
+    else:
+        text += "\n✅ Hot-reload применён"
+
+    await message.answer(text)
+
+
+def _parse_config_value(s: str):
+    """Парсит строку в типизированное значение для JSON."""
+    import json
+    s = s.strip()
+
+    # Булевы
+    if s.lower() == "true":
+        return True
+    if s.lower() == "false":
+        return False
+
+    # null
+    if s.lower() in ("null", "none", "нет"):
+        return None
+
+    # JSON (массивы, объекты, строки в кавычках)
+    if s.startswith(("[", "{", '"')):
+        try:
+            return json.loads(s)
+        except json.JSONDecodeError:
+            pass
+
+    # Число
+    try:
+        if "." in s:
+            return float(s)
+        return int(s)
+    except ValueError:
+        pass
+
+    # Строка
+    return s
+
+
+@router.callback_query(F.data.startswith("configedit:apply:"))
+async def cb_config_edit_apply(cq: CallbackQuery, config: Config):
+    """Применить все изменения секции."""
+    section = cq.data.split(":")[2]
+    uid = _uid(cq)
+    cache = _config_edit_cache.get(uid, {})
+    revision = cache.get("revision", "")
+    section_data = cache.get(section, {})
+
+    if not section_data:
+        await cq.answer("❌ Нет данных для применения", show_alert=True)
+        return
+
+    # Применяем секцию целиком
+    client, srv = await get_client(uid, config)
+    try:
+        result = await client.patch_config({section: section_data}, if_match=revision)
+    except ApiError as e:
+        await cq.answer(f"❌ {e}", show_alert=True)
+        return
+    except Exception as e:
+        await cq.answer(f"❌ {type(e).__name__}: {e}", show_alert=True)
+        return
+
+    new_rev = result.get("revision", "")
+    restart = result.get("restart_required", False)
+
+    text = f"✅ Секция <b>[{section}]</b> применена\n"
+    if new_rev:
+        text += f"revision: <code>{new_rev[:12]}…</code>\n"
+    if restart:
+        text += "\n⚠️ Требуется перезапуск Telemt!"
+    else:
+        text += "\n✅ Hot-reload"
+
+    await _safe_edit(cq, text, reply_markup=config_edit_confirm_kb(section))
+
+
+@router.callback_query(F.data.startswith("configedit:confirm:"))
+async def cb_config_edit_confirm(cq: CallbackQuery, state: FSMContext):
+    """После применения — вернуться к секции."""
+    section = cq.data.split(":")[2]
+    await cb_config_edit_section(cq, state)
 
 
 # ─── Alerts / Help ────────────────────────────────────────────────────────────

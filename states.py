@@ -29,3 +29,8 @@ class ProxyCheckFSM(StatesGroup):
 
 class NodeCheckFSM(StatesGroup):
     waiting_url = State()
+
+
+class ConfigEditFSM(StatesGroup):
+    choosing_field = State()
+    waiting_value = State()

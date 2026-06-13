@@ -54,8 +54,9 @@ def main_menu_kb(
         kb.button(text="📡 DC / Writers",       callback_data="menu:dcs")
         kb.button(text="📤 Бэкап",              callback_data="users:export_toml")
         kb.button(text="🔍 Проверить прокси",   callback_data="menu:proxy_check")
-        n_main = 11
-        schema_base = [2, 2, 2, 2, 2, 1]
+        kb.button(text="⚙️ Конфиг",            callback_data="menu:config_edit")
+        n_main = 12
+        schema_base = [2, 2, 2, 2, 2, 2]
 
     # Переключатель серверов
     menu_servers = config.get_menu_servers() if config else servers
@@ -379,6 +380,60 @@ def proxy_check_kb() -> InlineKeyboardMarkup:
     kb.button(text="🔍 Проверить ещё", callback_data="proxy:check_again")
     kb.button(text="◀️ Меню",          callback_data="menu:main")
     kb.adjust(1)
+    return kb.as_markup()
+
+
+# ─── Config edit ──────────────────────────────────────────────────────────────
+
+CONFIG_SECTIONS = [
+    ("general", "⚙️ General"),
+    ("timeouts", "⏱ Timeouts"),
+    ("censorship", "🛡 Censorship"),
+    ("upstreams", "🔗 Upstreams"),
+    ("show_link", "📋 Show Link"),
+    ("dc_overrides", "📡 DC Overrides"),
+]
+
+
+def config_edit_sections_kb() -> InlineKeyboardMarkup:
+    kb = InlineKeyboardBuilder()
+    for key, label in CONFIG_SECTIONS:
+        kb.button(text=label, callback_data=f"configedit:section:{key}")
+    kb.button(text="◀️ Меню", callback_data="menu:main")
+    kb.adjust(2)
+    return kb.as_markup()
+
+
+def config_edit_fields_kb(section: str, fields: list[str], current: dict) -> InlineKeyboardMarkup:
+    """Кнопки полей секции с текущими значениями."""
+    kb = InlineKeyboardBuilder()
+    for field in fields:
+        val = current.get(field, "—")
+        if isinstance(val, bool):
+            val = "true" if val else "false"
+        elif isinstance(val, list):
+            val = f"[{len(val)} items]"
+        elif isinstance(val, dict):
+            val = "{...}"
+        elif isinstance(val, str) and len(val) > 20:
+            val = val[:17] + "..."
+        label = f"{field}: {val}"
+        if len(label) > 40:
+            label = label[:37] + "..."
+        kb.button(text=label, callback_data=f"configedit:field:{section}:{field}")
+    kb.button(text="💾 Применить", callback_data=f"configedit:apply:{section}")
+    kb.button(text="◀️ Назад",     callback_data="configedit:menu")
+    kb.button(text="◀️ Меню",      callback_data="menu:main")
+    n = len(fields)
+    kb.adjust(*([1] * n) + [2, 1])
+    return kb.as_markup()
+
+
+def config_edit_confirm_kb(section: str) -> InlineKeyboardMarkup:
+    kb = InlineKeyboardBuilder()
+    kb.button(text="✅ Да, применить", callback_data=f"configedit:confirm:{section}")
+    kb.button(text="❌ Отмена",        callback_data=f"configedit:section:{section}")
+    kb.adjust(2)
     return kb.as_markup()
 
 
