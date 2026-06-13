@@ -1959,7 +1959,14 @@ async def fsm_config_edit_value(message: Message, state: FSMContext, config: Con
     await state.clear()
 
     if value_str == "/skip":
-        await message.answer("⏭ Без изменений. /menu")
+        uid = message.from_user.id
+        data = _config_edit_cache.get(uid, {})
+        revision = data.get("revision", "")
+        header = "<b>⚙️ Редактирование конфига</b>\n"
+        if revision:
+            header += f"<i>revision: {revision[:12]}…</i>"
+        header += "\n\nВыберите секцию:"
+        await message.answer(header, reply_markup=config_edit_sections_kb())
         return
 
     # Парсим значение
