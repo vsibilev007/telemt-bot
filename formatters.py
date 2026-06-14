@@ -4,6 +4,40 @@
 
 from __future__ import annotations
 
+import base64
+import urllib.parse
+
+
+def _extract_sni_from_link(link: str) -> str:
+    """Извлекает SNI (домен маскировки) из tg://proxy ссылки."""
+    try:
+        parsed = urllib.parse.urlparse(link)
+        params = urllib.parse.parse_qs(parsed.query)
+        secret_hex = params.get("secret", [""])[0]
+        if not secret_hex:
+            return ""
+
+        # Пробуем hex
+        try:
+            secret_bytes = bytes.fromhex(secret_hex)
+        except ValueError:
+            # Нечётная длина — пробуем base64url
+            try:
+                pad = secret_hex + "=" * (-len(secret_hex) % 4)
+                secret_bytes = base64.urlsafe_b64decode(pad)
+            except Exception:
+                return ""
+
+        # FakeTLS: ee prefix, SNI начинается с байта 17
+        if len(secret_bytes) > 17 and secret_bytes[0] == 0xee:
+            sni = secret_bytes[17:].decode("utf-8", errors="replace")
+            # Убираем невидимые/мусорные символы
+            sni = "".join(c for c in sni if c.isprintable())
+            return sni
+    except Exception:
+        pass
+    return ""
+
 import math
 from datetime import datetime, timezone
 from typing import Optional
@@ -316,7 +350,7 @@ def format_users_quota(data: dict) -> str:
 
 
 def format_user_links(u: dict) -> tuple[str, list[str]]:
-    """Возвращает (текст-заголовок, список ссылок)"""
+    """Возвращает (текст-заголовок, список ссылок) с доменами маскировки"""
     username = u.get("username", "?")
     links_data = u.get("links", {})
     classic = links_data.get("classic", [])
@@ -332,19 +366,22 @@ def format_user_links(u: dict) -> tuple[str, list[str]]:
     if classic:
         parts.append("\n<b>Classic:</b>")
         for link in classic:
-            parts.append(link)
+            parts.append(f"<code>{link}</code>")
 
     if secure:
         parts.append("\n<b>Secure (DD):</b>")
         for link in secure:
-            parts.append(link)
+            parts.append(f"<code>{link}</code>")
 
     if tls_links:
         parts.append("\n<b>TLS:</b>")
         for link in tls_links:
-            parts.append(link)
+            sni = _extract_sni_from_link(link)
+            if sni:
+                parts.append(f"🌐 <b>{sni}</b>")
+            parts.append(f"<code>{link}</code>")
 
-    parts.append("\n<i>Нажмите на ссылку, чтобы скопировать и открыть в Telegram</i>")
+    parts.append("\n<i>Нажмите на ссылку, чтобы скопировать</i>")
     return "\n".join(parts), all_links
 
 

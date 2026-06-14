@@ -206,9 +206,12 @@ def user_edit_kb(username: str) -> InlineKeyboardMarkup:
 
 
 def user_links_kb(username: str, links: list) -> InlineKeyboardMarkup:
+    from formatters import _extract_sni_from_link
     kb = InlineKeyboardBuilder()
-    for i in range(len(links)):
-        kb.button(text="📷 QR", callback_data=f"user:qr:{username}:{i}")
+    for i, link in enumerate(links):
+        sni = _extract_sni_from_link(link)
+        label = f"📷 {sni}" if sni else f"📷 QR {i+1}"
+        kb.button(text=label, callback_data=f"user:qr:{username}:{i}")
     kb.button(text="◀️ Назад", callback_data=f"user:view:{username}")
     kb.adjust(2)
     return kb.as_markup()
