@@ -120,7 +120,7 @@ RestartSec=5
 WantedBy=multi-user.target
 ```
 
-> Замени `/opt/telemt-bot` на реальный путь к проекту.
+> Замени `/opt/telemt-bot/telemt-bot` на реальный путь к проекту.
 
 ```bash
 systemctl daemon-reload
@@ -142,7 +142,7 @@ After=network.target
 [Service]
 Type=simple
 User=root
-ExecStart=/usr/bin/python3 /opt/proxy_agent.py --host 0.0.0.0 --port 8765 --token YOUR_TOKEN
+ExecStart=/usr/bin/python3 /opt/telemt-bot/proxy_agent.py --host 0.0.0.0 --port 8765 --token YOUR_TOKEN
 Restart=on-failure
 RestartSec=5
 
@@ -333,7 +333,7 @@ git clone https://github.com/vsibilev007/telemt-bot.git /opt/telemt-bot
 #### Шаг 2 — Проверить что работает
 
 ```bash
-python3 /opt/proxy_agent.py --host 0.0.0.0 --port 8765 --token YOUR_TOKEN &
+python3 /opt/telemt-bot/proxy_agent.py --host 0.0.0.0 --port 8765 --token YOUR_TOKEN &
 
 # В другом терминале:
 curl "http://127.0.0.1:8765/health" -H "X-Token: YOUR_TOKEN"
@@ -351,7 +351,7 @@ After=network.target
 [Service]
 Type=simple
 User=root
-ExecStart=/usr/bin/python3 /opt/proxy_agent.py --host 0.0.0.0 --port 8765 --token YOUR_TOKEN
+ExecStart=/usr/bin/python3 /opt/telemt-bot/proxy_agent.py --host 0.0.0.0 --port 8765 --token YOUR_TOKEN
 Restart=on-failure
 RestartSec=5
 
