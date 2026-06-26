@@ -1,84 +1,64 @@
 """
-Проверка MTProto прокси.
+Проверка MTProto прокси — на основе check_tg_proxy.
 
-EU-сервер (где запущен бот): TCP + MTProto через Telethon.
-Агенты (RU и другие серверы): TCP + TLS handshake через HTTP-агент.
-GeoIP: определяем флаг агента по его IP через ip-api.com.
+Проверки: TCP, TLS, MTProto (raw), стабильность, DPI-детекция, DNS.
 """
 
 from __future__ import annotations
 
 import asyncio
-import base64
+import hashlib
+import os
 import socket
+import ssl
+import struct
 import time
 import urllib.parse
 from dataclasses import dataclass, field
 from typing import Optional
 
 
-# ─── GeoIP ───────────────────────────────────────────────────────────────────
-
-_COUNTRY_FLAGS: dict[str, str] = {
-    "RU": "🇷🇺", "US": "🇺🇸", "DE": "🇩🇪", "FR": "🇫🇷",
-    "GB": "🇬🇧", "NL": "🇳🇱", "FI": "🇫🇮", "SE": "🇸🇪",
-    "PL": "🇵🇱", "UA": "🇺🇦", "BY": "🇧🇾", "KZ": "🇰🇿",
-    "LV": "🇱🇻", "LT": "🇱🇹", "EE": "🇪🇪", "CZ": "🇨🇿",
-    "AT": "🇦🇹", "CH": "🇨🇭", "TR": "🇹🇷", "JP": "🇯🇵",
-    "CN": "🇨🇳", "KR": "🇰🇷", "SG": "🇸🇬", "HK": "🇭🇰",
-    "CA": "🇨🇦", "AU": "🇦🇺", "BR": "🇧🇷", "IN": "🇮🇳",
-    "IT": "🇮🇹", "ES": "🇪🇸", "PT": "🇵🇹", "RO": "🇷🇴",
-    "HU": "🇭🇺", "BG": "🇧🇬", "RS": "🇷🇸", "SK": "🇸🇰",
-    "MD": "🇲🇩", "AM": "🇦🇲", "GE": "🇬🇪", "AZ": "🇦🇿",
-    "UZ": "🇺🇿", "IL": "🇮🇱", "AE": "🇦🇪", "CY": "🇨🇾",
-}
-
-_geoip_cache: dict[str, str] = {}  # url → "🇷🇺 RU"
-
-
-async def _resolve_agent_label(agent_url: str, flag: str = "", name: str = "") -> str:
-    """Возвращает '🇷🇺 RU' или '🌐 Name' для агента."""
-    if flag:
-        return f"{flag} {name}" if name else flag
-
-    # Берём IP из URL агента
-    try:
-        parsed = urllib.parse.urlparse(agent_url)
-        host = parsed.hostname or ""
-    except Exception:
-        host = ""
-
-    if not host:
-        return f"🌐 {name}" if name else "🌐"
-
-    cache_key = host
-    if cache_key in _geoip_cache:
-        return _geoip_cache[cache_key]
-
-    try:
-        import aiohttp as _aiohttp
-        async with _aiohttp.ClientSession() as s:
-            async with s.get(
-                f"http://ip-api.com/json/{host}?fields=countryCode",
-                timeout=_aiohttp.ClientTimeout(total=3),
-            ) as resp:
-                data = await resp.json()
-                cc = data.get("countryCode", "")
-                emoji = _COUNTRY_FLAGS.get(cc, "🌐")
-                label = f"{emoji} {name}" if name else f"{emoji} {cc}"
-                _geoip_cache[cache_key] = label
-                return label
-    except Exception:
-        label = f"🌐 {name}" if name else "🌐"
-        _geoip_cache[cache_key] = label
-        return label
-
-
 # ─── Данные ───────────────────────────────────────────────────────────────────
 
 @dataclass
+class CheckResult:
+    success: bool = False
+    rtt_ms: float = 0.0
+    error: str = ""
+    error_type: str = ""
+    detail: str = ""
+
+
+@dataclass
+class StabilityResult:
+    total: int = 0
+    success: int = 0
+    success_rate: float = 0.0
+    avg_rtt_ms: float = 0.0
+    min_rtt_ms: float = 0.0
+    max_rtt_ms: float = 0.0
+    jitter_ms: float = 0.0
+    pattern: str = "unknown"
+
+
+@dataclass
+class DpiResult:
+    sni_filtering: Optional[bool] = None
+    http_probe_responds: bool = False
+    http_is_web: bool = False
+    rst_detected: bool = False
+
+
+@dataclass
+class DnsResult:
+    system_ips: list[str] = field(default_factory=list)
+    consistent: bool = True
+    direct_ip: bool = False
+
+
+@dataclass
 class AgentResult:
-    label: str = ""        # "🇷🇺 RU"
+    label: str = ""
     tcp_ok: bool = False
     tcp_rtt: float = 0.0
     tls_ok: bool = False
@@ -94,46 +74,48 @@ class ProxyInfo:
     secret_bytes: bytes = b""
     secret_type: str = "unknown"
     sni: str = ""
-    # EU (где запущен бот)
-    eu_tcp_ok: bool = False
-    eu_tcp_rtt: float = 0.0
-    eu_mtproto_ok: bool = False
-    eu_mtproto_rtt: float = 0.0
-    eu_error: str = ""
+    raw_url: str = ""
+    # Результаты проверок
+    tcp: CheckResult = field(default_factory=CheckResult)
+    tls: CheckResult = field(default_factory=CheckResult)
+    mtproto: CheckResult = field(default_factory=CheckResult)
+    stability: StabilityResult = field(default_factory=StabilityResult)
+    dpi: DpiResult = field(default_factory=DpiResult)
+    dns: DnsResult = field(default_factory=DnsResult)
+    server_info: dict = field(default_factory=dict)
     # Агенты
     agents: list[AgentResult] = field(default_factory=list)
-    raw_url: str = ""
-    # Расширенная диагностика узла
-    resolved_ips: list[str] = field(default_factory=list)
-    node_tcp_ok: bool = False
-    node_tcp_rtt: float = 0.0
-    node_ssh_ok: bool = False
-    node_ssh_rtt: float = 0.0
-    node_ping_ok: bool = False
-    node_ping_rtt: float = 0.0
-    node_check_time_ms: float = 0.0
-    node_diag: str = ""
+    # Время
+    check_time_ms: float = 0.0
 
-    # Алиасы для обратной совместимости с handlers.py
+    # Алиасы
     @property
     def reachable(self) -> bool:
-        return self.eu_tcp_ok
+        return self.tcp.success
 
     @property
     def mtproto_ok(self) -> bool:
-        return self.eu_mtproto_ok
+        return self.mtproto.success
 
     @property
     def rtt_ms(self) -> float:
-        return self.eu_tcp_rtt
+        return self.tcp.rtt_ms
 
     @property
-    def mtproto_rtt_ms(self) -> float:
-        return self.eu_mtproto_rtt
+    def eu_tcp_ok(self) -> bool:
+        return self.tcp.success
 
     @property
-    def error(self) -> str:
-        return self.eu_error
+    def eu_tcp_rtt(self) -> float:
+        return self.tcp.rtt_ms
+
+    @property
+    def eu_mtproto_ok(self) -> bool:
+        return self.mtproto.success
+
+    @property
+    def eu_mtproto_rtt(self) -> float:
+        return self.mtproto.rtt_ms
 
 
 # ─── Парсинг URL ─────────────────────────────────────────────────────────────
@@ -195,208 +177,409 @@ def parse_proxy_url(url: str) -> Optional[ProxyInfo]:
     return info
 
 
-# ─── EU проверки ─────────────────────────────────────────────────────────────
+# ─── Классификация ошибок ────────────────────────────────────────────────────
 
-async def _resolve_dns(server: str, timeout: float = 3.0) -> list[str]:
-    """Резолвит DNS и возвращает список IP-адресов (IPv4 + IPv6)."""
+def _classify_tcp_error(e: Exception) -> str:
+    msg = str(e).lower()
+    if isinstance(e, asyncio.TimeoutError):
+        return "timeout"
+    if isinstance(e, ConnectionRefusedError):
+        return "connection_refused"
+    if isinstance(e, ConnectionResetError) or "reset" in msg:
+        return "connection_reset"
+    if "unreachable" in msg or "network" in msg:
+        return "network_unreachable"
+    if "no route" in msg:
+        return "no_route"
+    if "name or service not known" in msg or "getaddrinfo" in msg:
+        return "dns_error"
+    return str(e)[:80]
+
+
+def _classify_tls_error(e: Exception) -> str:
+    msg = str(e).lower()
+    if isinstance(e, asyncio.TimeoutError):
+        return "timeout"
+    if isinstance(e, ConnectionResetError) or "reset" in msg:
+        return "connection_reset"
+    if isinstance(e, ssl.SSLError):
+        if "eof" in msg or "unexpected eof" in msg:
+            return "unexpected_eof"
+        if "handshake" in msg:
+            return "handshake_failure"
+        if "certificate" in msg:
+            return "certificate_error"
+        if "alert" in msg:
+            return "tls_alert"
+        return f"ssl_error"
+    if isinstance(e, ConnectionRefusedError):
+        return "connection_refused"
+    if isinstance(e, OSError) and ("timed out" in msg or "timeout" in msg):
+        return "timeout"
+    return str(e)[:80]
+
+
+# ─── TCP проверка ─────────────────────────────────────────────────────────────
+
+async def check_tcp(host: str, port: int, timeout: float = 10) -> CheckResult:
+    start = time.monotonic()
     try:
-        loop = asyncio.get_running_loop()
-        # Пробуем IPv4
-        ipv4 = await asyncio.wait_for(
-            loop.getaddrinfo(server, None, family=socket.AF_INET),
+        _, writer = await asyncio.wait_for(
+            asyncio.open_connection(host, port), timeout=timeout,
+        )
+        rtt = (time.monotonic() - start) * 1000
+        writer.close()
+        await writer.wait_closed()
+        return CheckResult(success=True, rtt_ms=round(rtt, 1))
+    except Exception as e:
+        return CheckResult(
+            success=False, error=str(e)[:100],
+            error_type=_classify_tcp_error(e),
+        )
+
+
+# ─── TLS проверка ─────────────────────────────────────────────────────────────
+
+async def check_tls(host: str, port: int, sni: str, timeout: float = 10) -> CheckResult:
+    if not sni:
+        return CheckResult(success=False, error="no SNI available")
+
+    start = time.monotonic()
+    try:
+        ctx = ssl.create_default_context()
+        ctx.check_hostname = False
+        ctx.verify_mode = ssl.CERT_NONE
+        _, writer = await asyncio.wait_for(
+            asyncio.open_connection(host, port, ssl=ctx, server_hostname=sni),
             timeout=timeout,
         )
-        ips = [addr[4][0] for addr in ipv4]
+        rtt = (time.monotonic() - start) * 1000
+        writer.close()
+        await writer.wait_closed()
+        return CheckResult(success=True, rtt_ms=round(rtt, 1))
+    except Exception as e:
+        return CheckResult(
+            success=False, error=str(e)[:100],
+            error_type=_classify_tls_error(e),
+        )
+
+
+# ─── MTProto проверка (raw) ──────────────────────────────────────────────────
+
+async def check_mtproto(host: str, port: int, secret_hex: str, timeout: float = 10) -> CheckResult:
+    start = time.monotonic()
+    try:
+        secret_bytes = bytes.fromhex(secret_hex)
+    except ValueError:
+        # Пробуем base64url
+        try:
+            pad = secret_hex + "=" * (-len(secret_hex) % 4)
+            import base64
+            secret_bytes = base64.urlsafe_b64decode(pad)
+        except Exception:
+            return CheckResult(success=False, error="invalid secret")
+
+    if len(secret_bytes) < 17:
+        return CheckResult(success=False, error="secret too short")
+
+    tag = secret_bytes[0]
+    key_secret = secret_bytes[1:17]
+
+    try:
+        reader, writer = await asyncio.wait_for(
+            asyncio.open_connection(host, port), timeout=timeout,
+        )
+    except asyncio.TimeoutError:
+        return CheckResult(success=False, error="tcp timeout", error_type="timeout")
+    except Exception as e:
+        return CheckResult(success=False, error=str(e)[:100], error_type=_classify_tcp_error(e))
+
+    try:
+        init_payload = _build_obfuscated_init(key_secret, tag)
+        writer.write(init_payload)
+        await writer.drain()
+        connect_rtt = (time.monotonic() - start) * 1000
+
+        try:
+            data = await asyncio.wait_for(reader.read(128), timeout=3)
+            rtt = (time.monotonic() - start) * 1000
+            if data:
+                return CheckResult(success=True, rtt_ms=round(connect_rtt, 1), detail="responded")
+            else:
+                elapsed_after_send = rtt - connect_rtt
+                if elapsed_after_send > 1000:
+                    return CheckResult(success=True, rtt_ms=round(connect_rtt, 1), detail="kept_alive")
+                return CheckResult(success=False, rtt_ms=round(connect_rtt, 1), error="init rejected", detail="closed")
+        except asyncio.TimeoutError:
+            return CheckResult(success=True, rtt_ms=round(connect_rtt, 1), detail="kept_alive")
+
+    except ConnectionResetError:
+        rtt = (time.monotonic() - start) * 1000
+        return CheckResult(success=False, rtt_ms=round(rtt, 1), error="connection reset")
+    except Exception as e:
+        rtt = (time.monotonic() - start) * 1000
+        return CheckResult(success=False, rtt_ms=round(rtt, 1), error=str(e)[:100])
+    finally:
+        writer.close()
+        await writer.wait_closed()
+
+
+def _build_obfuscated_init(key_secret: bytes, tag: int) -> bytes:
+    while True:
+        nonce = os.urandom(64)
+        if nonce[0] == 0xEF:
+            continue
+        first_int = struct.unpack("<I", nonce[:4])[0]
+        if first_int in (0x44414548, 0x54534F50, 0x20544547, 0x4954504F,
+                         0xDDDDDDDD, 0xEEEEEEEE, 0x02010316):
+            continue
+        if nonce[:4] == b'\x16\x03\x01\x02':
+            continue
+        break
+
+    nonce = bytearray(nonce)
+
+    if tag == 0xDD:
+        nonce[56:60] = b'\xdd\xdd\xdd\xdd'
+    elif tag == 0xEE:
+        nonce[56:60] = b'\xef\xef\xef\xef'
+    else:
+        nonce[56:60] = b'\xef\xef\xef\xef'
+
+    enc_key_data = bytes(nonce[8:40]) + key_secret
+    enc_key = hashlib.sha256(enc_key_data).digest()
+    enc_iv = bytes(nonce[40:56])
+
+    from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
+    enc_cipher = Cipher(algorithms.AES(enc_key), modes.CTR(enc_iv))
+    encryptor = enc_cipher.encryptor()
+
+    encrypted_part = encryptor.update(bytes(nonce[56:64]))
+    result = bytearray(nonce)
+    result[56:64] = encrypted_part
+
+    return bytes(result)
+
+
+# ─── Стабильность ────────────────────────────────────────────────────────────
+
+async def check_stability(host: str, port: int, count: int = 10, delay: float = 0.3) -> StabilityResult:
+    results = []
+
+    async def _single_connect():
+        start = time.monotonic()
+        try:
+            _, writer = await asyncio.wait_for(
+                asyncio.open_connection(host, port), timeout=5,
+            )
+            rtt = (time.monotonic() - start) * 1000
+            writer.close()
+            await writer.wait_closed()
+            return True, round(rtt, 1)
+        except asyncio.TimeoutError:
+            return False, 0
+        except Exception:
+            return False, 0
+
+    for i in range(count):
+        ok, rtt = await _single_connect()
+        results.append((ok, rtt))
+        if i < count - 1:
+            await asyncio.sleep(delay)
+
+    success = sum(1 for ok, _ in results if ok)
+    rtts = [rtt for ok, rtt in results if ok]
+    avg_rtt = round(sum(rtts) / len(rtts), 1) if rtts else 0
+    min_rtt = round(min(rtts), 1) if rtts else 0
+    max_rtt = round(max(rtts), 1) if rtts else 0
+    jitter = round(max_rtt - min_rtt, 1) if rtts else 0
+
+    pattern = "stable"
+    if success == 0:
+        pattern = "blocked"
+    elif success < count:
+        pattern = "unstable"
+
+    return StabilityResult(
+        total=count, success=success,
+        success_rate=round(success / count * 100),
+        avg_rtt_ms=avg_rtt, min_rtt_ms=min_rtt,
+        max_rtt_ms=max_rtt, jitter_ms=jitter,
+        pattern=pattern,
+    )
+
+
+# ─── DPI-детекция ─────────────────────────────────────────────────────────────
+
+async def _try_tls_connect(host: str, port: int, sni: str) -> dict:
+    start = time.monotonic()
+    try:
+        ctx = ssl.create_default_context()
+        ctx.check_hostname = False
+        ctx.verify_mode = ssl.CERT_NONE
+        _, writer = await asyncio.wait_for(
+            asyncio.open_connection(host, port, ssl=ctx, server_hostname=sni),
+            timeout=8,
+        )
+        rtt = (time.monotonic() - start) * 1000
+        writer.close()
+        await writer.wait_closed()
+        return {"ok": True, "rtt_ms": round(rtt, 1)}
+    except asyncio.TimeoutError:
+        return {"ok": False, "error": "timeout"}
+    except Exception as e:
+        return {"ok": False, "error": str(e)[:80]}
+
+
+async def _http_probe(host: str, port: int, sni: str = "") -> dict:
+    hostname = sni or host
+    try:
+        reader, writer = await asyncio.wait_for(
+            asyncio.open_connection(host, port), timeout=5,
+        )
+        writer.write(f"GET / HTTP/1.1\r\nHost: {hostname}\r\nConnection: close\r\n\r\n".encode())
+        await writer.drain()
+        data = await asyncio.wait_for(reader.read(1024), timeout=5)
+        writer.close()
+        await writer.wait_closed()
+        response = data[:200].decode("utf-8", errors="replace")
+        is_http = response.startswith("HTTP/")
+        return {"responds": True, "is_http": is_http, "snippet": response[:100]}
+    except asyncio.TimeoutError:
+        return {"responds": False, "is_http": False, "snippet": ""}
+    except Exception as e:
+        return {"responds": False, "is_http": False, "snippet": str(e)[:100]}
+
+
+async def check_dpi(host: str, port: int, sni: str) -> DpiResult:
+    result = DpiResult()
+
+    if sni:
+        # Проверяем разные SNI-профили
+        profiles = {
+            "correct": sni,
+            "cdn": "www.google.com",
+            "nonexistent": "rand-check.invalid",
+        }
+        sni_results = {}
+        for name, test_sni in profiles.items():
+            sni_results[name] = await _try_tls_connect(host, port, test_sni)
+
+        correct_ok = sni_results["correct"]["ok"]
+        cdn_ok = sni_results["cdn"]["ok"]
+        nonexist_ok = sni_results["nonexistent"]["ok"]
+
+        if correct_ok and cdn_ok and nonexist_ok:
+            result.sni_filtering = False
+        elif not correct_ok and cdn_ok:
+            result.sni_filtering = True
+        elif not correct_ok and not cdn_ok and not nonexist_ok:
+            result.sni_filtering = None
+        else:
+            result.sni_filtering = "partial"
+
+    # HTTP-проба
+    http_result = await _http_probe(host, port, sni)
+    result.http_probe_responds = http_result.get("responds", False)
+    result.http_is_web = http_result.get("is_http", False)
+
+    return result
+
+
+# ─── DNS проверка ─────────────────────────────────────────────────────────────
+
+def _is_ip(host: str) -> bool:
+    try:
+        socket.inet_aton(host)
+        return True
+    except OSError:
+        return False
+
+
+async def check_dns(host: str) -> DnsResult:
+    result = DnsResult()
+
+    if _is_ip(host):
+        result.direct_ip = True
+        result.system_ips = [host]
+        return result
+
+    try:
+        loop = asyncio.get_running_loop()
+        res = await asyncio.wait_for(
+            loop.getaddrinfo(host, None, family=socket.AF_INET),
+            timeout=3,
+        )
+        result.system_ips = list(dict.fromkeys(r[4][0] for r in res))
     except Exception:
-        ips = []
+        result.system_ips = []
+
+    return result
+
+
+# ─── GeoIP ───────────────────────────────────────────────────────────────────
+
+_COUNTRY_FLAGS: dict[str, str] = {
+    "RU": "🇷🇺", "US": "🇺🇸", "DE": "🇩🇪", "FR": "🇫🇷",
+    "GB": "🇬🇧", "NL": "🇳🇱", "FI": "🇫🇮", "SE": "🇸🇪",
+    "PL": "🇵🇱", "UA": "🇺🇦", "BY": "🇧🇾", "KZ": "🇰🇿",
+    "TR": "🇹🇷", "JP": "🇯🇵", "KR": "🇰🇷", "SG": "🇸🇬",
+    "CA": "🇨🇦", "AU": "🇦🇺", "BR": "🇧🇷", "IN": "🇮🇳",
+    "LV": "🇱🇻", "LT": "🇱🇹", "EE": "🇪🇪", "CZ": "🇨🇿",
+    "AT": "🇦🇹", "CH": "🇨🇭", "IT": "🇮🇹", "ES": "🇪🇸",
+    "PT": "🇵🇹", "RO": "🇷🇴", "HU": "🇭🇺", "BG": "🇧🇬",
+    "RS": "🇷🇸", "SK": "🇸🇰", "MD": "🇲🇩", "AM": "🇦🇲",
+    "GE": "🇬🇪", "AZ": "🇦🇿", "UZ": "🇺🇿", "IL": "🇮🇱",
+    "AE": "🇦🇪", "CY": "🇨🇾", "CN": "🇨🇳", "HK": "🇭🇰",
+    "ID": "🇮🇩", "TH": "🇹🇭", "VN": "🇻🇳", "MY": "🇲🇾",
+    "PH": "🇵🇭", "BD": "🇧🇩", "PK": "🇵🇰", "NG": "🇳🇬",
+    "ZA": "🇿🇦", "EG": "🇪🇬", "KE": "🇰🇪", "AR": "🇦🇷",
+    "CL": "🇨🇱", "CO": "🇨🇴", "PE": "🇵🇪", "MX": "🇲🇽",
+}
+
+_geoip_cache: dict[str, str] = {}
+
+
+async def get_server_info(host: str) -> dict:
+    """Получить информацию о сервере через ip-api.com."""
+    if _is_ip(host):
+        return {"ip": host, "country": "", "city": "", "org": ""}
 
     try:
+        # Сначала резолвим
         loop = asyncio.get_running_loop()
-        # Пробуем IPv6
-        ipv6 = await asyncio.wait_for(
-            loop.getaddrinfo(server, None, family=socket.AF_INET6),
-            timeout=timeout,
+        res = await asyncio.wait_for(
+            loop.getaddrinfo(host, None, family=socket.AF_INET),
+            timeout=3,
         )
-        ips += [addr[4][0] for addr in ipv6]
+        ip = res[0][4][0] if res else host
+    except Exception:
+        ip = host
+
+    try:
+        import aiohttp
+        async with aiohttp.ClientSession() as session:
+            async with session.get(
+                f"http://ip-api.com/json/{ip}?fields=status,country,countryCode,city,org,as",
+                timeout=aiohttp.ClientTimeout(total=5),
+            ) as resp:
+                data = await resp.json()
+                if data.get("status") == "success":
+                    return {
+                        "ip": ip,
+                        "country": data.get("country", ""),
+                        "country_code": data.get("countryCode", ""),
+                        "city": data.get("city", ""),
+                        "org": data.get("org", ""),
+                        "asn": data.get("as", ""),
+                    }
     except Exception:
         pass
 
-    return list(dict.fromkeys(ips))  # dedupe, preserving order
+    return {"ip": ip, "country": "", "city": "", "org": ""}
 
 
-async def _check_eu_tcp(info: ProxyInfo, timeout: float = 5.0):
-    start = time.monotonic()
-    try:
-        _, writer = await asyncio.wait_for(
-            asyncio.open_connection(info.server, info.port),
-            timeout=timeout,
-        )
-        info.eu_tcp_rtt = (time.monotonic() - start) * 1000
-        info.eu_tcp_ok = True
-        writer.close()
-        try:
-            await writer.wait_closed()
-        except Exception:
-            pass
-    except asyncio.TimeoutError:
-        info.eu_tcp_ok = False
-        info.eu_error = f"TCP timeout"
-    except OSError as e:
-        info.eu_tcp_ok = False
-        info.eu_error = str(e)
-
-
-async def _check_eu_mtproto(info: ProxyInfo, timeout: float = 20.0):
-    try:
-        from telethon import TelegramClient
-        from telethon.sessions import MemorySession
-        from telethon.network import ConnectionTcpMTProxyRandomizedIntermediate
-    except ImportError:
-        return
-
-    proxy = (info.server, info.port, info.secret)
-    client = TelegramClient(
-        MemorySession(), 2040, "b18441a1ff607e10a989891a5462e627",
-        connection=ConnectionTcpMTProxyRandomizedIntermediate,
-        proxy=proxy,
-        connection_retries=1, retry_delay=0, request_retries=1,
-    )
-
-    start = time.monotonic()
-    try:
-        await asyncio.wait_for(client.connect(), timeout=timeout)
-        info.eu_mtproto_rtt = (time.monotonic() - start) * 1000
-        info.eu_mtproto_ok = True
-    except asyncio.TimeoutError:
-        info.eu_mtproto_ok = False
-    except Exception as e:
-        err = str(e)
-        elapsed = time.monotonic() - start
-        auth_errors = ["auth", "401", "unauthorized", "dc_id", "migrat",
-                       "phone", "flood", "rpc", "session", "user"]
-        if any(x in err.lower() for x in auth_errors) or elapsed > 1:
-            info.eu_mtproto_ok = True
-            info.eu_mtproto_rtt = elapsed * 1000
-    finally:
-        try:
-            await client.disconnect()
-        except Exception:
-            pass
-
-
-# ─── Расширенная диагностика узла ─────────────────────────────────────────────
-
-async def _check_node_tcp(info: ProxyInfo, timeout: float = 5.0):
-    """TCP-проверка прокси-порта (аналог _check_eu_tcp, но для узла)."""
-    start = time.monotonic()
-    try:
-        _, writer = await asyncio.wait_for(
-            asyncio.open_connection(info.server, info.port),
-            timeout=timeout,
-        )
-        info.node_tcp_rtt = (time.monotonic() - start) * 1000
-        info.node_tcp_ok = True
-        writer.close()
-        try:
-            await writer.wait_closed()
-        except Exception:
-            pass
-    except asyncio.TimeoutError:
-        info.node_tcp_ok = False
-    except OSError:
-        info.node_tcp_ok = False
-
-
-async def _check_node_ssh(info: ProxyInfo, host: str, timeout: float = 3.0):
-    """TCP-проверка SSH-порта (22)."""
-    start = time.monotonic()
-    try:
-        _, writer = await asyncio.wait_for(
-            asyncio.open_connection(host, 22),
-            timeout=timeout,
-        )
-        info.node_ssh_rtt = (time.monotonic() - start) * 1000
-        info.node_ssh_ok = True
-        writer.close()
-        try:
-            await writer.wait_closed()
-        except Exception:
-            pass
-    except Exception:
-        info.node_ssh_ok = False
-
-
-async def _check_node_ping(info: ProxyInfo, host: str, timeout: float = 3.0):
-    """ICMP ping через asyncio.create_subprocess_exec."""
-    start = time.monotonic()
-    try:
-        proc = await asyncio.create_subprocess_exec(
-            "ping", "-c", "1", "-W", str(int(timeout)), host,
-            stdout=asyncio.subprocess.DEVNULL,
-            stderr=asyncio.subprocess.DEVNULL,
-        )
-        await asyncio.wait_for(proc.wait(), timeout=timeout + 1)
-        info.node_ping_rtt = (time.monotonic() - start) * 1000
-        info.node_ping_ok = proc.returncode == 0
-    except Exception:
-        info.node_ping_ok = False
-
-
-async def check_node_full(info: ProxyInfo, timeout: float = 5.0, agents=None) -> ProxyInfo:
-    """
-    Расширенная проверка узла: DNS + TCP proxy + SSH + Ping + MTProto + агенты.
-    """
-    start_total = time.monotonic()
-
-    # DNS (параллельно с остальным)
-    dns_task = asyncio.create_task(_resolve_dns(info.server))
-
-    # Параллельно: TCP прокси, SSH, Ping
-    await asyncio.gather(
-        _check_node_tcp(info, timeout=timeout),
-        _check_node_ssh(info, info.server, timeout=3.0),
-        _check_node_ping(info, info.server, timeout=3.0),
-    )
-
-    # Ждём DNS
-    info.resolved_ips = await dns_task
-
-    # MTProto (если TCP доступен)
-    if info.node_tcp_ok:
-        await _check_eu_mtproto(info, timeout=20.0)
-        info.eu_tcp_ok = info.node_tcp_ok
-        info.eu_tcp_rtt = info.node_tcp_rtt
-
-    # Агенты (параллельно)
-    if agents:
-        agent_labels = await asyncio.gather(*[
-            _resolve_agent_label(a.url, a.flag, a.name) for a in agents
-        ])
-        agent_results = await asyncio.gather(*[
-            _check_via_agent(info, a.url, a.token, label)
-            for a, label in zip(agents, agent_labels)
-        ])
-        info.agents = list(agent_results)
-
-    info.node_check_time_ms = (time.monotonic() - start_total) * 1000
-
-    # Диагностика — честная
-    parts = []
-    if info.eu_mtproto_ok:
-        parts.append("MTProto доступен")
-    if info.node_tcp_ok:
-        if info.eu_mtproto_ok:
-            parts.append("сервис отвечает штатно")
-        else:
-            parts.append("TCP доступен, но MTProto не работает")
-    if not parts:
-        parts.append("нет соединения с узлом")
-    info.node_diag = ", ".join(parts)
-
-    return info
-
-
-# ─── Агент проверки ──────────────────────────────────────────────────────────
+# ─── Агенты ───────────────────────────────────────────────────────────────────
 
 async def _check_via_agent(
     info: ProxyInfo,
@@ -407,14 +590,14 @@ async def _check_via_agent(
 ) -> AgentResult:
     result = AgentResult(label=label)
     try:
-        import aiohttp as _aiohttp
+        import aiohttp
         url = f"{agent_url.rstrip('/')}/check"
         params = {"host": info.server, "port": info.port, "sni": info.sni}
         headers = {"X-Token": agent_token} if agent_token else {}
-        async with _aiohttp.ClientSession() as session:
+        async with aiohttp.ClientSession() as session:
             async with session.get(
                 url, params=params, headers=headers,
-                timeout=_aiohttp.ClientTimeout(total=timeout),
+                timeout=aiohttp.ClientTimeout(total=timeout),
             ) as resp:
                 data = await resp.json()
                 tcp = data.get("tcp", {})
@@ -424,61 +607,124 @@ async def _check_via_agent(
                 result.tls_ok = tls.get("ok", False)
                 result.tls_rtt = tls.get("rtt_ms", 0.0)
                 if not result.tcp_ok:
-                    result.tcp_error = tcp.get("error", "недоступен")
+                    result.tcp_error = tcp.get("error", "недоступен")[:60]
     except Exception as e:
         result.tcp_ok = False
         result.tcp_error = str(e)[:60]
     return result
 
 
-# ─── Основная функция ─────────────────────────────────────────────────────────
+async def _resolve_agent_label(agent_url: str, flag: str = "", name: str = "") -> str:
+    if flag:
+        return f"{flag} {name}" if name else flag
+    try:
+        parsed = urllib.parse.urlparse(agent_url)
+        host = parsed.hostname or ""
+    except Exception:
+        host = ""
+    if not host:
+        return f"🌐 {name}" if name else "🌐"
+    if host in _geoip_cache:
+        return _geoip_cache[host]
+    try:
+        import aiohttp
+        async with aiohttp.ClientSession() as s:
+            async with s.get(
+                f"http://ip-api.com/json/{host}?fields=countryCode",
+                timeout=aiohttp.ClientTimeout(total=3),
+            ) as resp:
+                data = await resp.json()
+                cc = data.get("countryCode", "")
+                emoji = _COUNTRY_FLAGS.get(cc, "🌐")
+                label = f"{emoji} {name}" if name else f"{emoji} {cc}"
+                _geoip_cache[host] = label
+                return label
+    except Exception:
+        label = f"🌐 {name}" if name else "🌐"
+        _geoip_cache[host] = label
+        return label
 
-async def check_proxy(
-    info: ProxyInfo,
-    timeout: float = 5.0,
-    agents=None,  # list[AgentConfig]
-) -> ProxyInfo:
-    """
-    Полная проверка: EU TCP+MTProto + все агенты параллельно.
-    agents — список AgentConfig из config.py
-    """
-    # Получаем метки агентов (geoip)
-    agent_labels = []
+
+# ─── Полная проверка узла ─────────────────────────────────────────────────────
+
+async def check_node_full(info: ProxyInfo, timeout: float = 5.0, agents=None) -> ProxyInfo:
+    """Полная проверка узла: TCP + TLS + MTProto + стабильность + DPI + DNS + GeoIP + агенты."""
+    start_total = time.monotonic()
+
+    # Параллельно: TCP, TLS, DNS, GeoIP
+    tcp_task = asyncio.create_task(check_tcp(info.server, info.port, timeout))
+    tls_task = asyncio.create_task(check_tls(info.server, info.port, info.sni, timeout)) if info.sni else None
+    dns_task = asyncio.create_task(check_dns(info.server))
+    geoip_task = asyncio.create_task(get_server_info(info.server))
+
+    info.tcp = await tcp_task
+    info.tls = await tls_task if tls_task else CheckResult(success=False, error="no SNI")
+    info.dns = await dns_task
+    info.server_info = await geoip_task
+
+    # MTProto (если TCP доступен и есть секрет)
+    if info.tcp.success and info.secret:
+        info.mtproto = await check_mtproto(info.server, info.port, info.secret, timeout=10)
+
+    # Стабильность (5 проверок вместо 10 для скорости)
+    if info.tcp.success:
+        info.stability = await check_stability(info.server, info.port, count=5, delay=0.3)
+
+    # DPI-детекция (если TCP доступен)
+    if info.tcp.success and info.sni:
+        info.dpi = await check_dpi(info.server, info.port, info.sni)
+
+    # Агенты
     if agents:
-        label_tasks = [
-            _resolve_agent_label(a.url, a.flag, a.name)
-            for a in agents
-        ]
-        agent_labels = await asyncio.gather(*label_tasks)
+        agent_labels = await asyncio.gather(*[
+            _resolve_agent_label(a.url, a.flag, a.name) for a in agents
+        ])
+        agent_results = await asyncio.gather(*[
+            _check_via_agent(info, a.url, a.token, label)
+            for a, label in zip(agents, agent_labels)
+        ])
+        info.agents = list(agent_results)
 
-    # Запускаем EU TCP и все агенты параллельно
-    tasks = [asyncio.create_task(_check_eu_tcp(info, timeout=timeout))]
-    agent_tasks = []
-    if agents:
-        for agent, label in zip(agents, agent_labels):
-            t = asyncio.create_task(
-                _check_via_agent(info, agent.url, agent.token, label)
-            )
-            agent_tasks.append(t)
-
-    await tasks[0]
-    agent_results = await asyncio.gather(*agent_tasks) if agent_tasks else []
-    info.agents = list(agent_results)
-
-    # MTProto только если EU TCP прошёл
-    if info.eu_tcp_ok:
-        await _check_eu_mtproto(info, timeout=20.0)
+    info.check_time_ms = (time.monotonic() - start_total) * 1000
 
     return info
 
 
-# ─── Форматирование ──────────────────────────────────────────────────────────
+# ─── Простая проверка (для кнопки «Проверить прокси») ─────────────────────────
+
+async def check_proxy(info: ProxyInfo, timeout: float = 5.0, agents=None) -> ProxyInfo:
+    """Простая проверка: TCP + MTProto + агенты."""
+    start = time.monotonic()
+
+    # TCP
+    info.tcp = await check_tcp(info.server, info.port, timeout)
+
+    # MTProto
+    if info.tcp.success and info.secret:
+        info.mtproto = await check_mtproto(info.server, info.port, info.secret, timeout=20)
+
+    # Агенты
+    if agents:
+        agent_labels = await asyncio.gather(*[
+            _resolve_agent_label(a.url, a.flag, a.name) for a in agents
+        ])
+        agent_results = await asyncio.gather(*[
+            _check_via_agent(info, a.url, a.token, label)
+            for a, label in zip(agents, agent_labels)
+        ])
+        info.agents = list(agent_results)
+
+    info.check_time_ms = (time.monotonic() - start) * 1000
+    return info
+
+
+# ─── Форматирование (простое) ────────────────────────────────────────────────
 
 def format_proxy_result(info: ProxyInfo) -> str:
     type_labels = {
         "faketls": "🛡 FakeTLS",
-        "dd":      "🔵 DD",
-        "simple":  "⚪ Simple",
+        "dd": "🔵 DD",
+        "simple": "⚪ Simple",
         "unknown": "❓ Неизвестный",
     }
 
@@ -495,17 +741,15 @@ def format_proxy_result(info: ProxyInfo) -> str:
 
     lines += ["", "<b>📡 Доступность:</b>"]
 
-    # EU строка
-    eu_tcp = "🟢" if info.eu_tcp_ok else "🔴"
-    eu_tcp_rtt = f"{info.eu_tcp_rtt:.0f} мс" if info.eu_tcp_ok else "—"
-    eu_mtp = "🟢" if info.eu_mtproto_ok else "🔴"
-    eu_mtp_rtt = f"{info.eu_mtproto_rtt:.0f} мс" if info.eu_mtproto_ok else "—"
-    eu_line = f"  🇪🇺 EU — TCP: {eu_tcp} {eu_tcp_rtt}"
-    if info.eu_tcp_ok:
-        eu_line += f"  |  MTProto: {eu_mtp} {eu_mtp_rtt}"
-    lines.append(eu_line)
+    tcp_icon = "🟢" if info.tcp.success else "🔴"
+    tcp_rtt = f"{info.tcp.rtt_ms:.0f} мс" if info.tcp.success else (info.tcp.error or "—")
+    lines.append(f"  {tcp_icon} TCP ({info.port}): {tcp_rtt}")
 
-    # Строки агентов
+    if info.mtproto.success:
+        lines.append(f"  🟢 MTProto: {info.mtproto.rtt_ms:.0f} мс")
+    elif info.tcp.success:
+        lines.append(f"  🔴 MTProto: {info.mtproto.error or 'недоступен'}")
+
     for ar in info.agents:
         tcp_icon = "🟢" if ar.tcp_ok else "🔴"
         tcp_rtt = f"{ar.tcp_rtt:.0f} мс" if ar.tcp_ok else f"<i>{ar.tcp_error or '—'}</i>"
@@ -516,26 +760,21 @@ def format_proxy_result(info: ProxyInfo) -> str:
             line += f"  |  TLS: {tls_icon} {tls_rtt}"
         lines.append(line)
 
-    if not info.eu_tcp_ok and info.eu_error:
-        lines += ["", f"❌ <b>EU ошибка:</b> <code>{info.eu_error}</code>"]
+    if not info.tcp.success and info.tcp.error:
+        lines += ["", f"❌ <b>Ошибка:</b> <code>{info.tcp.error}</code>"]
 
     return "\n".join(lines)
 
 
-def format_node_result(info: ProxyInfo) -> str:
-    """Форматирует расширенный результат проверки узла (как на скриншоте)."""
-    type_labels = {
-        "faketls": "FakeTLS",
-        "dd":      "DD",
-        "simple":  "Simple",
-        "unknown": "Unknown",
-    }
+# ─── Форматирование (расширенное) ────────────────────────────────────────────
 
+def format_node_result(info: ProxyInfo) -> str:
+    """Форматирует результат полной диагностики узла."""
     # Итоговый статус
-    if info.eu_mtproto_ok:
+    if info.mtproto.success:
         status = "OK"
         status_icon = "✅"
-    elif info.node_tcp_ok:
+    elif info.tcp.success:
         status = "PARTIAL"
         status_icon = "🟡"
     else:
@@ -543,58 +782,81 @@ def format_node_result(info: ProxyInfo) -> str:
         status_icon = "❌"
 
     lines = [
-        f"{status_icon} <b>Проверка узла {info.server}</b> ({', '.join(info.resolved_ips) if info.resolved_ips else 'DNS: ?'})",
+        f"{status_icon} <b>Проверка узла {info.server}</b>",
         "",
     ]
 
-    # Resolved IPs
-    if info.resolved_ips:
-        lines.append(f"  Resolved ips: {', '.join(info.resolved_ips)}")
+    # GeoIP
+    gi = info.server_info
+    if gi and gi.get("country"):
+        flag = _COUNTRY_FLAGS.get(gi.get("country_code", ""), "🌐")
+        loc = f"{gi.get('city', '')}, {gi.get('country', '')}" if gi.get("city") else gi.get("country", "")
+        org = gi.get("org", "")
+        line = f"  📍 {flag} {loc}"
+        if org:
+            line += f" — <i>{org}</i>"
+        lines.append(line)
         lines.append("")
 
+    # ─── Проверка с сервера (бот) ──────────────────────────────────────────────
+    lines.append("<b>🖥 Сервер (бот):</b>")
+
+    # TCP
+    tcp_icon = "✅" if info.tcp.success else "❌"
+    tcp_text = f"{info.tcp.rtt_ms:.0f} мс" if info.tcp.success else (info.tcp.error_type or "недоступен")
+    lines.append(f"  {tcp_icon} TCP ({info.port}): {tcp_text}")
+
+    # TLS
+    if info.sni:
+        tls_icon = "✅" if info.tls.success else ("⚠️" if info.tls.success is None else "❌")
+        tls_text = f"{info.tls.rtt_ms:.0f} мс" if info.tls.success else (info.tls.error_type or "—")
+        lines.append(f"  {tls_icon} TLS ({info.sni}): {tls_text}")
+
     # MTProto
-    mtp_icon = "✅" if info.eu_mtproto_ok else "❌"
-    mtp_status = "доступен" if info.eu_mtproto_ok else "недоступен"
-    lines.append(f"  {mtp_icon} MTProto ({info.port}): {mtp_status}")
+    if info.mtproto.success:
+        lines.append(f"  ✅ MTProto: {info.mtproto.rtt_ms:.0f} мс ({info.mtproto.detail})")
+    elif info.tcp.success:
+        lines.append(f"  ❌ MTProto: {info.mtproto.error or 'недоступен'}")
 
-    # TCP proxy
-    tcp_icon = "✅" if info.node_tcp_ok else "❌"
-    tcp_status = "доступен" if info.node_tcp_ok else "недоступен"
-    lines.append(f"  {tcp_icon} TCP proxy ({info.port}): {tcp_status}")
+    # Стабильность
+    if info.stability.total > 0:
+        stab_icon = "✅" if info.stability.pattern == "stable" else ("⚠️" if info.stability.pattern == "unstable" else "❌")
+        lines.append(f"  {stab_icon} Стабильность: {info.stability.success}/{info.stability.total} ({info.stability.success_rate}%) — {info.stability.pattern}")
 
-    # TCP SSH
-    ssh_icon = "✅" if info.node_ssh_ok else "❌"
-    ssh_status = "доступен" if info.node_ssh_ok else "недоступен"
-    lines.append(f"  {ssh_icon} TCP SSH (22): {ssh_status}")
+    # DPI
+    if info.dpi.sni_filtering is not None:
+        dpi_icon = "✅" if not info.dpi.sni_filtering else "⚠️"
+        lines.append(f"  {dpi_icon} DPI-фильтрация SNI: {'да' if info.dpi.sni_filtering else 'нет'}")
 
-    # Ping
-    ping_icon = "✅" if info.node_ping_ok else "❌"
-    ping_status = "доступен" if info.node_ping_ok else "недоступен"
-    lines.append(f"  {ping_icon} Ping: {ping_status}")
-
-    lines.append("")
-
-    # Диагностика
-    diag_icon = "✅" if info.eu_mtproto_ok else "⚠️"
-    lines.append(f"  {diag_icon} Диагностика: {info.node_diag}")
-
-    # Время проверки
-    lines.append(f"  ⏱ Время проверки: {info.node_check_time_ms:.0f} ms")
-
-    # Итоговый статус
-    lines.append(f"  {status_icon} Итоговый статус: {status}")
-
-    # Агенты (если есть)
+    # ─── Агенты ────────────────────────────────────────────────────────────────
     if info.agents:
-        lines += ["", "<b>📡 Агенты:</b>"]
+        lines.append("")
+        lines.append("<b>📡 Агенты:</b>")
         for ar in info.agents:
             tcp_icon = "🟢" if ar.tcp_ok else "🔴"
             tcp_rtt = f"{ar.tcp_rtt:.0f} мс" if ar.tcp_ok else f"<i>{ar.tcp_error or '—'}</i>"
-            line = f"  {ar.label} — TCP: {tcp_icon} {tcp_rtt}"
+            lines.append(f"  <b>{ar.label}</b>")
+            lines.append(f"    TCP: {tcp_icon} {tcp_rtt}")
             if ar.tcp_ok:
                 tls_icon = "🟢" if ar.tls_ok else "🔴"
                 tls_rtt = f"{ar.tls_rtt:.0f} мс" if ar.tls_ok else "—"
-                line += f"  |  TLS: {tls_icon} {tls_rtt}"
-            lines.append(line)
+                lines.append(f"    TLS: {tls_icon} {tls_rtt}")
+
+    # Диагностика
+    parts = []
+    if info.mtproto.success:
+        parts.append("MTProto доступен")
+    if info.tcp.success:
+        if info.mtproto.success:
+            parts.append("сервис отвечает штатно")
+        else:
+            parts.append("TCP доступен, но MTProto не работает")
+    if not parts:
+        parts.append("нет соединения с узлом")
+
+    lines.append("")
+    lines.append(f"  {'✅' if info.mtproto.success else '⚠️'} Диагностика: {', '.join(parts)}")
+    lines.append(f"  ⏱ Время проверки: {info.check_time_ms:.0f} ms")
+    lines.append(f"  {status_icon} Итоговый статус: {status}")
 
     return "\n".join(lines)
