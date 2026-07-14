@@ -1,3 +1,28 @@
+# Release: Docker-образ + CI/CD на GHCR
+
+## Docker-образ (новое)
+
+- **Производственный Dockerfile** — двухстадийная сборка (`builder` → `final`) на `python:3.11-slim-bookworm`
+- **Non-root пользователь** `appuser` (UID 10001) — контейнер не запускается от root
+- **Hardening**: `read_only`, `cap_drop: ALL`, `no-new-privileges`, `mem_limit: 256m`, `pids_limit: 256`
+- **Named volume** `telemt-data:/data` — безопасное хранение БД с правильными правами
+- **Trim слоя**: удаляются `__pycache__`, тесты пакетов, `.pyc`/`.pyx`/`.pyi` — меньше итогового размера
+
+## CI/CD (новое)
+
+- **GitHub Actions** — пайплайн `lint → build → scan → push` при пуше в `main` и по тегам `v*.*.*`
+- **Lint**: `ruff check` на каждый PR
+- **Trivy scan** — сканирование HIGH/CRITICAL уязвимостей перед пушем; сборка падает при наличии фиксов
+- **GHCR**: образ публикуется в `ghcr.io/ddark008/telemt-bot` с тегами `latest`, `v1.2.3`, `1.2`, `sha-abc1234`
+- **GHA cache**: BuildKit кеширует слои между запусками — быстрые повторные сборки
+
+## Исправления безопасности (зависимости)
+
+- `Pillow 12.1.1 → 12.3.0` (CVE-2026-40192 DoS, CVE-2026-42311 code execution)
+- `setuptools → 83.0.0` — обновлены вендорные пакеты: `jaraco.context 6.1.0` (CVE-2026-23949), `wheel 0.46.3` (CVE-2026-24049)
+
+---
+
 # Release: Диагностика узла + ссылки с SNI-доменами + 3.4.18
 
 ## Диагностика узла (новое)

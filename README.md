@@ -27,6 +27,108 @@ Telegram-бот для управления [Telemt MTProxy](https://github.com/
 
 ---
 
+## Быстрый старт через Docker
+
+Готовый образ публикуется на GitHub Container Registry после каждого мержа в `main` и при создании тега `v*.*.*`.
+
+```bash
+# Скачать образ вручную (опционально)
+docker pull ghcr.io/ddark008/telemt-bot:latest
+```
+
+### 1. Создать `.env`
+
+```bash
+cp .env.example .env
+nano .env          # заполни BOT_TOKEN, ALLOWED_USERS, SERVER_URL
+```
+
+### 2. Запустить через Docker Compose
+
+```bash
+curl -O https://raw.githubusercontent.com/ddark008/telemt-bot/main/docker-compose.yml
+docker compose up -d
+```
+
+По умолчанию `docker-compose.yml` тянет образ с GHCR. Если хочешь собрать локально — закомментируй строку `image:` и раскомментируй `build: .`.
+
+### Доступные теги
+
+| Тег | Описание |
+|-----|----------|
+| `latest` | Последний коммит в `main` |
+| `v1.2.3` | Конкретная версия |
+| `1.2` | Последний патч в мажоре |
+| `sha-abc1234` | Конкретный коммит |
+
+### Данные и том
+
+База данных хранится в named volume `telemt-data` (путь внутри контейнера — `/data`). **Не используй bind-mount** (`./data:/data`) — это перетирает права `appuser` и вызывает `unable to open database file`.
+
+```bash
+# Посмотреть данные
+docker volume inspect telemt-data
+
+# Бэкап тома
+docker run --rm -v telemt-data:/data -v $(pwd):/backup alpine \
+  tar czf /backup/telemt-data.tar.gz -C /data .
+```
+
+### Бэкап telemt.toml
+
+Кнопка **📤 Бэкап** в меню отправляет файл `telemt.toml` прямо в чат. В Docker контейнер не видит хостовый `/etc/telemt/telemt.toml` — нужно явно смонтировать файл.
+
+**Шаг 1 — выставить права на хосте:**
+
+```bash
+chown 10001 /etc/telemt/telemt.toml
+chmod 640 /etc/telemt/telemt.toml
+```
+
+Контейнер запускается как `appuser` (UID 10001) — файл должен быть ему доступен для чтения.
+
+**Шаг 2 — раскомментировать mount в `docker-compose.yml`:**
+
+```yaml
+volumes:
+  - telemt-data:/data
+  - /etc/telemt/telemt.toml:/etc/telemt/telemt.toml:ro  # ← раскомментировать
+```
+
+Если `telemt.toml` лежит в другом месте — укажи путь через переменную окружения в `.env`:
+
+```env
+TELEMT_CONFIG_PATH=/path/to/telemt.toml
+```
+
+И соответственно поменяй левую часть mount:
+
+```yaml
+- /path/to/telemt.toml:/etc/telemt/telemt.toml:ro
+```
+
+> **Альтернатива без изменения владельца:** используй POSIX ACL (требует пакет `acl`):
+> ```bash
+> setfacl -m u:10001:r /etc/telemt/telemt.toml
+> ```
+
+### Локальная сборка
+
+```bash
+docker build -t telemt-bot .
+docker run -d --env-file .env -v telemt-data:/data --name telemt-bot telemt-bot
+```
+
+### Параметры безопасности (включены в compose)
+
+- `read_only: true` — файловая система контейнера только для чтения
+- `cap_drop: ALL` — сброс всех Linux capabilities
+- `no-new-privileges: true` — запрет эскалации привилегий
+- `mem_limit: 256m`, `pids_limit: 256` — лимиты ресурсов
+- Non-root пользователь `appuser` (UID 10001)
+
+---
+
 ## Установка на свежей системе
 
 ### 1. Установить Python и зависимости
