@@ -6,15 +6,16 @@ from __future__ import annotations
 
 import json
 import logging
-from datetime import datetime, timezone
+import os
 from functools import wraps
+from pathlib import Path
 
 import aiosqlite
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.interval import IntervalTrigger
 
 from api_client import TelemetClient, ApiError
-from config import Config, AlertThresholds
+from config import Config
 import database as db
 
 logger = logging.getLogger(__name__)
@@ -24,6 +25,7 @@ _bot = None
 _config: Config | None = None
 
 DB_PATH = db.DB_PATH
+HEARTBEAT_PATH = Path(os.environ.get("TELEMT_BOT_HEARTBEAT_PATH", "/tmp/healthy"))
 
 
 # ─── Декоратор: защищённый запуск джобы ─────────────────────────────────────
@@ -67,15 +69,27 @@ def setup(bot, config: Config):
         id="cleanup",
         replace_existing=True,
     )
+    _scheduler.add_job(
+        _heartbeat,
+        IntervalTrigger(seconds=20),
+        id="heartbeat",
+        replace_existing=True,
+    )
 
     _scheduler.start()
-    logger.info("Scheduler запущен (3 задачи)")
+    logger.info("Scheduler запущен (4 задачи)")
 
 
 def stop():
     if _scheduler and _scheduler.running:
         _scheduler.shutdown(wait=False)
         logger.info("Scheduler остановлен")
+
+
+@safe_job("heartbeat")
+async def _heartbeat():
+    """Touch-ает файл для Docker HEALTHCHECK — подтверждает, что event loop живой."""
+    HEARTBEAT_PATH.touch()
 
 
 # ─── DB helpers ─────────────────────────────────────────────────────────────
