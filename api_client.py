@@ -73,7 +73,7 @@ class TelemetClient:
                             )
                         return data.get("data", {})
             except aiohttp.ServerTimeoutError:
-                raise ApiError("timeout", f"Нет ответа от API за 10с", status=0)
+                raise ApiError("timeout", "Нет ответа от API за 10с", status=0)
             except aiohttp.ClientConnectorError as e:
                 raise ApiError("unreachable", f"Не удалось подключиться: {e}", status=0)
 
@@ -192,7 +192,6 @@ async def cluster_read(servers: list, method_name: str, *args, **kwargs) -> Any:
     Читает данные с первого доступного узла кластера.
     servers: list[ServerConfig]
     """
-    from config import ServerConfig as _SC
     last_error = None
     for srv in servers:
         try:

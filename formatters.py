@@ -5,7 +5,11 @@
 from __future__ import annotations
 
 import base64
+import math
 import urllib.parse
+from typing import Optional
+
+import tz as _tz
 
 
 def _extract_sni_from_link(link: str) -> str:
@@ -38,11 +42,6 @@ def _extract_sni_from_link(link: str) -> str:
         pass
     return ""
 
-import math
-from datetime import datetime, timezone
-from typing import Optional
-import tz as _tz
-
 
 def _epoch_to_str(epoch: int) -> str:
     return _tz.fmt_datetime(epoch)
@@ -66,9 +65,12 @@ def fmt_uptime(seconds: float) -> str:
     h, s = divmod(s, 3600)
     m, s = divmod(s, 60)
     parts = []
-    if d: parts.append(f"{d}д")
-    if h: parts.append(f"{h}ч")
-    if m: parts.append(f"{m}м")
+    if d:
+        parts.append(f"{d}д")
+    if h:
+        parts.append(f"{h}ч")
+    if m:
+        parts.append(f"{m}м")
     parts.append(f"{s}с")
     return " ".join(parts)
 
@@ -743,7 +745,6 @@ def format_tls_fingerprints(d: dict) -> str:
     data         = d.get("data") or {}
     by_fp        = data.get("by_fingerprint", [])
     by_ip        = data.get("by_ip", [])
-    by_cidr      = data.get("by_cidr", [])
     by_user      = data.get("by_user", [])
     dropped      = data.get("dropped_total", 0)
     parse_err    = data.get("parse_error_total", 0)

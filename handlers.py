@@ -15,7 +15,7 @@ from aiogram import F, Router
 from aiogram.exceptions import TelegramBadRequest
 from aiogram.filters import CommandStart, Command
 from aiogram.fsm.context import FSMContext
-from aiogram.types import BufferedInputFile, CallbackQuery, InputMediaPhoto, Message, ReplyKeyboardRemove
+from aiogram.types import BufferedInputFile, CallbackQuery, InlineKeyboardMarkup, InputMediaPhoto, Message, ReplyKeyboardRemove
 
 
 from api_client import ApiError, TelemetClient, cluster_write, cluster_read, cluster_users_with_nodes, NodeResult
@@ -27,7 +27,7 @@ from formatters import (
     format_limits, format_me_quality, format_me_writers, format_runtime_events,
     format_runtime_gates, format_runtime_init, format_security_posture,
     format_security_whitelist, format_tls_fingerprints, format_upstream_quality,
-    format_upstreams, format_user_detail, format_user_list, format_user_links,
+    format_upstreams, format_user_detail, format_user_links,
     format_users_quota, fmt_bytes,
 )
 from keyboards import (
@@ -35,8 +35,7 @@ from keyboards import (
     main_menu_kb, runtime_kb, runtime_sub_kb, security_kb, security_sub_kb,
     sysinfo_kb, traffic_period_kb, traffic_report_kb, upstreams_kb,
     proxy_check_kb,
-    config_edit_sections_kb, config_edit_fields_kb, config_edit_confirm_kb, CONFIG_SECTIONS,
-    user_delete_confirm_kb, user_detail_kb, user_edit_kb,
+    config_edit_sections_kb, config_edit_fields_kb, config_edit_confirm_kb, user_delete_confirm_kb, user_detail_kb, user_edit_kb,
     user_links_kb, user_links_kb_no_links, users_delete_expired_confirm_kb,
     users_extra_kb, users_list_kb,
 )
@@ -46,7 +45,7 @@ from sysinfo import get_system_info, format_system_status
 import charts
 import proxy_checker as pc
 from proxy_checker import format_node_result
-from states import CreateUserFSM, EditFieldFSM, QuickAddFSM, SearchUserFSM, ProxyCheckFSM, NodeCheckFSM, ConfigEditFSM
+from states import CreateUserFSM, EditFieldFSM, SearchUserFSM, ProxyCheckFSM, NodeCheckFSM, ConfigEditFSM
 from export_toml import router as export_toml_router
 from database import set_alert, get_alert
 
@@ -606,7 +605,6 @@ async def cb_users_expiring(cq: CallbackQuery, config: Config):
     for name, dt in expiring:
         lines.append(f"  <code>{name}</code> — {dt.strftime('%Y-%m-%d')}")
 
-    from keyboards import users_delete_expired_confirm_kb as _exp_confirm_kb
     from aiogram.utils.keyboard import InlineKeyboardBuilder as _IKB
     exp_kb = _IKB()
     exp_kb.button(text="🧹 Удалить истёкших", callback_data="users:delete_expired_confirm")
@@ -1010,7 +1008,6 @@ async def cb_user_qr(cq: CallbackQuery, config: Config):
         return
     await cq.answer("Генерирую QR...")
     link = all_links[index]
-    label = link_short_label(link, index)
     try:
         png = make_qr_bytes(link)
         photo = BufferedInputFile(png, filename=f"qr_{username}_{index}.png")
@@ -1771,13 +1768,10 @@ async def _do_node_check(message: Message, state: FSMContext, url: str):
 
     wait_msg = await message.answer("⏳ Проверяю узел, подожди 2-8 секунд...")
 
-    from config import Config as _Cfg
     # Получаем агенты из конфига (нужен uid → config)
     config = None
     try:
         # Пытаемся получить конфиг через state или диспетчер
-        from session import get_client, get_server_index
-        uid = message.from_user.id
         # Импортируем конфиг напрямую
         from config import load_config
         config = load_config()
@@ -1880,7 +1874,7 @@ async def cb_config_edit_section(cq: CallbackQuery, state: FSMContext):
     fields = CONFIG_FIELDS.get(section)
 
     # Для секций-массивов/словарей — показать как целое
-    if fields == [] or fields is {}:
+    if fields == [] or fields == {}:
         text = f"<b>⚙️ [{section}]</b>\n\n"
         if isinstance(section_data, list):
             text += f"Текущее значение:\n<code>{section_data}</code>\n\n"
@@ -2098,7 +2092,6 @@ async def cb_config_edit_apply(cq: CallbackQuery, config: Config):
 @router.callback_query(F.data.startswith("configedit:confirm:"))
 async def cb_config_edit_confirm(cq: CallbackQuery, state: FSMContext):
     """После применения — вернуться к секции."""
-    section = cq.data.split(":")[2]
     await cb_config_edit_section(cq, state)
 
 
