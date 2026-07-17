@@ -1,0 +1,42 @@
+services:
+  bot:
+    # Готовый образ из GHCR. Замени OWNER или задай GHCR_OWNER в окружении.
+    # Для локальной сборки закомментируй image и раскомментируй build.
+    image: ghcr.io/${GHCR_OWNER:-owner}/telemt-bot:latest
+    # build: .
+    container_name: telemt-bot
+    restart: unless-stopped
+    env_file: .env
+
+    volumes:
+      # Named volume — наследует права из образа (appuser 10001).
+      # Bind-mount (./data:/data) НЕ используем: перетирает права → "unable to open database file".
+      - telemt-data:/data
+      # Для кнопки "📤 Бэкап" — монтируем telemt.toml (только чтение).
+      # Перед запуском выставить права: chown 10001 /etc/telemt/telemt.toml && chmod 640 /etc/telemt/telemt.toml
+      # Путь можно переопределить через TELEMT_CONFIG_PATH в .env
+      # - /etc/telemt/telemt.toml:/etc/telemt/telemt.toml:ro
+
+    # --- hardening ---
+    read_only: true
+    tmpfs:
+      - /tmp
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+
+    # --- resource limits (низкое потребление) ---
+    mem_limit: 256m
+    pids_limit: 256
+
+    # --- log rotation (диск не пухнет) ---
+    logging:
+      driver: json-file
+      options:
+        max-size: "50m"
+        max-file: "5"
+
+volumes:
+  telemt-data:
+    name: telemt-data

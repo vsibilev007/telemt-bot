@@ -1,0 +1,31 @@
+# VCS / CI
+.git
+.gitignore
+.github
+
+# Secrets / local state
+.env
+*.db
+*.db-journal
+*.db-wal
+*.db-shm
+data/
+*.log
+
+# Python
+venv/
+.venv/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.ruff_cache/
+.mypy_cache/
+.pytest_cache/
+
+# Docs / meta
+*.md
+LICENSE
+docker-compose.yml
+Dockerfile
+.dockerignore

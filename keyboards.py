@@ -40,7 +40,6 @@ def main_menu_kb(
         kb.button(text="➕ Новый клиент",    callback_data="user:create")
         kb.button(text="⚡ Runtime",        callback_data="menu:runtime")
         kb.button(text="📤 Бэкап",          callback_data="users:export_toml")
-        n_main = 5
         schema_base = [1, 2, 2]
     else:
         kb.button(text=status_btn,              callback_data="menu:dashboard")
@@ -55,7 +54,6 @@ def main_menu_kb(
         kb.button(text="📤 Бэкап",              callback_data="users:export_toml")
         kb.button(text="🔍 Проверить прокси",   callback_data="menu:proxy_check")
         kb.button(text="⚙️ Конфиг",            callback_data="menu:config_edit")
-        n_main = 12
         schema_base = [2, 2, 2, 2, 2, 2]
 
     # Переключатель серверов

@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 import asyncio
+import base64
 import hashlib
 import os
 import socket
@@ -211,7 +212,7 @@ def _classify_tls_error(e: Exception) -> str:
             return "certificate_error"
         if "alert" in msg:
             return "tls_alert"
-        return f"ssl_error"
+        return "ssl_error"
     if isinstance(e, ConnectionRefusedError):
         return "connection_refused"
     if isinstance(e, OSError) and ("timed out" in msg or "timeout" in msg):
