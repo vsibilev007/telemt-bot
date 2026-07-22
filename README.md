@@ -374,6 +374,8 @@ TELEGRAM_PROXY_URL=http://host:port
 | `/adduser имя [дней]` | Быстро создать клиента |
 | `/find запрос` | Поиск клиента по имени |
 | `/check tg://proxy?...` | Диагностика узла (DNS, TCP, SSH, Ping, MTProto) |
+| `/reload [instant\|drain]` | Runtime reload без перезапуска (3.4.25+) |
+| `/reload_status <id>` | Статус reload операции |
 | `/alerts` | Настройки алертов |
 | `/alert_log` | История последних 20 алертов |
 | `/id` | Ваш Telegram ID |
