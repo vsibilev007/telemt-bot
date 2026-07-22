@@ -42,6 +42,7 @@ async def setup_bot_menu(bot: Bot, config=None):
             BotCommand(command="alerts",    description="Настройки алертов"),
             BotCommand(command="alert_log", description="История последних 20 алертов"),
             BotCommand(command="check",     description="Диагностика узла по прокси-ссылке"),
+            BotCommand(command="reload",    description="Runtime reload без перезапуска"),
         ]
     await bot.set_my_commands(commands, scope=BotCommandScopeDefault())
     await bot.set_chat_menu_button(menu_button=MenuButtonCommands())

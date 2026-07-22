@@ -1,4 +1,13 @@
-# Release: Docker-образ + CI/CD + Диагностика узла + 3.4.24
+# Release: Docker-образ + CI/CD + Диагностика узла + Runtime Reload + 3.4.25
+
+## Runtime Reload (3.4.25+)
+
+- **Команда /reload** — безопасная перезагрузка runtime-конфигурации без перезапуска процесса
+  - `/reload instant` — мгновенное переключение, старые сессии отменяются
+  - `/reload drain` — плавное завершение старых сессий
+- **Команда /reload_status** — проверка статуса reload операции
+- **api_client.py** — методы system_reload(), get_reload_status()
+- **PATCH /v1/config** — поддержка параметра `?reload=instant|drain` для patch + reload за один запрос
 
 ## Docker-образ (новое)
 
@@ -30,11 +39,12 @@
 - **QR-кнопки** — показывают домен вместо generic QR (📷 domain.name)
 - Извлечение SNI из FakeTLS-секрета автоматическое
 
-## API Telemt 3.4.14-3.4.24
+## API Telemt 3.4.14-3.4.25
 
 - **Сброс квоты** — кнопка "Сбросить квоту" в карточке клиента (POST /v1/users/{username}/reset-quota)
-- **api_client.py** — методы reset_user_quota(), get_config(), patch_config()
+- **api_client.py** — методы reset_user_quota(), get_config(), patch_config(), system_reload(), get_reload_status()
 - **Редактирование конфига** — кнопка "Конфиг" в главном меню, 6 секций через PATCH /v1/config
+- **Runtime reload** — /reload instant|drain, /reload_status, PATCH /v1/config?reload=instant
 
 ## Бэкап конфигурации
 

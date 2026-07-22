@@ -160,9 +160,23 @@ class TelemetClient:
         """GET /v1/config (3.4.16+)"""
         return await self._request("GET", "/config")
 
-    async def patch_config(self, payload: dict, if_match: str = "") -> dict:
-        """PATCH /v1/config (3.4.16+)"""
-        return await self._request("PATCH", "/config", json=payload, if_match=if_match or None)
+    async def patch_config(self, payload: dict, if_match: str = "", reload: str = "") -> dict:
+        """PATCH /v1/config (3.4.16+). reload: 'instant' или 'drain' (3.4.25+)"""
+        path = "/config"
+        if reload:
+            path += f"?reload={reload}"
+        return await self._request("PATCH", path, json=payload, if_match=if_match or None)
+
+    async def system_reload(self, mode: str = "instant", failure_policy: str = "keep_new", timeout_secs: int = 30) -> dict:
+        """POST /v1/system/reload (3.4.25+) — runtime reload без перезапуска процесса"""
+        body = {"mode": mode, "failure_policy": failure_policy}
+        if mode == "drain":
+            body["timeout_secs"] = timeout_secs
+        return await self._request("POST", "/system/reload", json=body)
+
+    async def get_reload_status(self, reload_id: int) -> dict:
+        """GET /v1/system/reload/{id} (3.4.25+) — статус reload операции"""
+        return await self._request("GET", f"/system/reload/{reload_id}")
 
     async def get_runtime_tls_fingerprints(self, limit: int = 100) -> dict:
         """GET /v1/runtime/tls-fingerprints?limit=N (3.4.14+)"""

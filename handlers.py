@@ -2095,7 +2095,98 @@ async def cb_config_edit_confirm(cq: CallbackQuery, state: FSMContext):
     await cb_config_edit_section(cq, state)
 
 
-# ─── Alerts / Help ────────────────────────────────────────────────────────────
+# ─── /reload — runtime reload (3.4.25+) ──────────────────────────────────────
+
+@router.message(Command("reload"))
+async def cmd_reload(message: Message, config: Config):
+    """/reload [instant|drain] — runtime reload без перезапуска процесса"""
+    args = message.text.replace("/reload", "", 1).strip().split()
+    mode = args[0] if args else "instant"
+
+    if mode not in ("instant", "drain"):
+        await message.answer(
+            "❌ Неверный режим. Допустимые: <code>instant</code>, <code>drain</code>\n\n"
+            "<b>instant</b> — мгновенное переключение, старые сессии отменяются\n"
+            "<b>drain</b> — плавное завершение старых сессий"
+        )
+        return
+
+    uid = message.from_user.id
+    client, srv = await get_client(uid, config)
+
+    try:
+        result = await client.system_reload(mode=mode)
+    except ApiError as e:
+        await message.answer(f"❌ Ошибка: {e}")
+        return
+    except Exception as e:
+        await message.answer(f"❌ Ошибка: {type(e).__name__}: {e}")
+        return
+
+    reload_id = result.get("reload_id", "?")
+    state_name = result.get("state", "?")
+    target_gen = result.get("target_generation", "?")
+
+    icon = "✅" if state_name == "accepted" else "⚠️"
+    await message.answer(
+        f"{icon} <b>Runtime reload принят</b>\n\n"
+        f"ID: <code>{reload_id}</code>\n"
+        f"Режим: <code>{mode}</code>\n"
+        f"Целевое поколение: <code>{target_gen}</code>\n"
+        f"Статус: <code>{state_name}</code>\n\n"
+        f"Проверить статус: <code>/reload_status {reload_id}</code>"
+    )
+
+
+@router.message(Command("reload_status"))
+async def cmd_reload_status(message: Message, config: Config):
+    """/reload_status <id> — проверить статус reload операции"""
+    args = message.text.replace("/reload_status", "", 1).strip().split()
+    if not args or not args[0].isdigit():
+        await message.answer("Использование: <code>/reload_status &lt;id&gt;</code>")
+        return
+
+    reload_id = int(args[0])
+    uid = message.from_user.id
+    client, srv = await get_client(uid, config)
+
+    try:
+        result = await client.get_reload_status(reload_id)
+    except ApiError as e:
+        await message.answer(f"❌ Ошибка: {e}")
+        return
+    except Exception as e:
+        await message.answer(f"❌ Ошибка: {type(e).__name__}: {e}")
+        return
+
+    state_name = result.get("state", "?")
+    mode = result.get("mode", "?")
+    target_gen = result.get("target_generation", "?")
+
+    icons = {
+        "accepted": "⏳", "preparing": "🔄", "activating": "🔄",
+        "draining": "🔄", "succeeded": "✅", "rolled_back": "↩️", "failed": "❌"
+    }
+    icon = icons.get(state_name, "❓")
+
+    lines = [
+        f"{icon} <b>Reload #{reload_id}</b>",
+        f"Режим: <code>{mode}</code>",
+        f"Поколение: <code>{target_gen}</code>",
+        f"Статус: <code>{state_name}</code>",
+    ]
+
+    if result.get("error"):
+        lines.append(f"Ошибка: {result['error']}")
+    if result.get("warnings"):
+        lines.append(f"Предупреждения: {', '.join(result['warnings'])}")
+    if result.get("deferred_process_fields"):
+        lines.append(f"Отложенные: {', '.join(result['deferred_process_fields'])}")
+    if result.get("finished_at_epoch_secs"):
+        from tz import fmt_datetime
+        lines.append(f"Завершено: {fmt_datetime(result['finished_at_epoch_secs'])}")
+
+    await message.answer("\n".join(lines))
 
 #@router.message(Command("alerts"))
 #async def cmd_alerts(message: Message):
@@ -2232,6 +2323,7 @@ async def cmd_help(message: Message):
         "       <i>проверка: DNS, TCP, SSH, Ping, MTProto</i>\n"
         "/alerts — включить / выключить алерты\n"
         "/alert_log — история последних 20 алертов\n"
+        "/reload <code>[instant|drain]</code> — runtime reload (3.4.25+)\n"
         "/id — ваш Telegram ID\n"
         "\n"
         "<b>Главное меню</b>\n"
