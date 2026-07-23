@@ -2324,6 +2324,7 @@ async def cmd_help(message: Message):
         "/alerts — включить / выключить алерты\n"
         "/alert_log — история последних 20 алертов\n"
         "/reload <code>[instant|drain]</code> — runtime reload (3.4.25+)\n"
+        "/reload_status <code>&lt;id&gt;</code> — статус reload операции\n"
         "/id — ваш Telegram ID\n"
         "\n"
         "<b>Главное меню</b>\n"
