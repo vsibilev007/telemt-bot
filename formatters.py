@@ -375,7 +375,8 @@ def format_users_quota(data: dict) -> str:
 
 def format_user_links(u: dict, web_config: dict = None) -> tuple[str, list[str]]:
     """Возвращает (текст-заголовок, список ссылок) с доменами маскировки.
-    Если web_config передан — добавляет WEB-ссылки tg://webproxy."""
+    Если web_config передан — добавляет WEB-ссылки tg://webproxy.
+    TLS-ссылки с внутренним адресом (127.0.0.1) скрываются если есть WEB-ссылки."""
     username = u.get("username", "?")
     links_data = u.get("links", {})
     classic = links_data.get("classic", [])
@@ -423,7 +424,9 @@ def format_user_links(u: dict, web_config: dict = None) -> tuple[str, list[str]]
         for link in secure:
             parts.append(f"<code>{link}</code>")
 
-    if tls_links:
+    # TLS-ссылки показываем только если нет WEB-ссылок
+    # (TLS-ссылки с 127.0.0.1 не работают снаружи)
+    if tls_links and not web_links:
         parts.append("\n<b>TLS:</b>")
         for link in tls_links:
             sni = _extract_sni_from_link(link)
