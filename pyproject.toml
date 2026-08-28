@@ -28,7 +28,7 @@ indent-width = 4
 target-version = "py311"
 
 [tool.ruff.lint]
-ignore = ["BLE001", "UP041", "SIM117", "S110", "I001", "G201", "B023", "PERF102", "RUF059", "SIM114", "UP035", "EXE001", "UP045"]
+ignore = ["BLE001", "UP041", "SIM117", "S110", "I001", "G201", "B023", "PERF102", "RUF059", "SIM114", "UP035", "EXE001", "UP045", "UP017", "FURB162"]
 fixable = ["ALL"]
 unfixable = []
 dummy-variable-rgx = "^(_+|(_+[a-zA-Z0-9_]*[a-zA-Z0-9]+?))$"
