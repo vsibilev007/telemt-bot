@@ -52,9 +52,10 @@ def main_menu_kb(
         kb.button(text="🔗 Upstreams",          callback_data="menu:upstreams")
         kb.button(text="📡 DC / Writers",       callback_data="menu:dcs")
         kb.button(text="📤 Бэкап",              callback_data="users:export_toml")
+        kb.button(text="🌐 WEB Proxy",          callback_data="menu:web")
         kb.button(text="🔍 Проверить прокси",   callback_data="menu:proxy_check")
         kb.button(text="⚙️ Конфиг",            callback_data="menu:config_edit")
-        schema_base = [2, 2, 2, 2, 2, 2]
+        schema_base = [2, 2, 2, 2, 2, 2, 1]
 
     # Переключатель серверов
     menu_servers = config.get_menu_servers() if config else servers
@@ -393,6 +394,7 @@ CONFIG_SECTIONS = [
     ("upstreams", "🔗 Upstreams"),
     ("show_link", "📋 Show Link"),
     ("dc_overrides", "📡 DC Overrides"),
+    ("web", "🌐 WEB Proxy"),
 ]
 
 
@@ -440,4 +442,44 @@ def config_edit_confirm_kb(section: str) -> InlineKeyboardMarkup:
 
 def export_toml_kb() -> InlineKeyboardMarkup:
     kb = InlineKeyboardBuilder()
+    return kb.as_markup()
+
+
+# ─── WEB Proxy ────────────────────────────────────────────────────────────────
+
+def web_menu_kb() -> InlineKeyboardMarkup:
+    kb = InlineKeyboardBuilder()
+    kb.button(text="📊 Статус",           callback_data="web:status")
+    kb.button(text="👥 Сессии",           callback_data="web:sessions")
+    kb.button(text="🧹 Очистить debug",   callback_data="web:debug_clear")
+    kb.button(text="🔄 Сброс learning",   callback_data="web:carrier_reset")
+    kb.button(text="◀️ Меню",             callback_data="menu:main")
+    kb.adjust(2, 2, 1)
+    return kb.as_markup()
+
+
+def web_sessions_kb(sessions: list, has_next: bool = False, next_cursor: str = "") -> InlineKeyboardMarkup:
+    kb = InlineKeyboardBuilder()
+    for s in sessions[:10]:
+        ref = s.get("session_ref", "")
+        short = ref.split(".")[-1][:8] if "." in ref else ref[:8]
+        user = s.get("user", "?")
+        state = s.get("state", "?")
+        icon = {"healthy": "🟢", "committed": "🔵", "provisional": "🟡",
+                "closing": "🔴"}.get(state, "⚪")
+        kb.button(text=f"{icon} {user} ({short})", callback_data=f"web:session:{ref}")
+    if has_next and next_cursor:
+        kb.button(text="▶️ Ещё", callback_data=f"web:sessions_next:{next_cursor}")
+    kb.button(text="◀️ WEB", callback_data="menu:web")
+    n = min(len(sessions), 10)
+    kb.adjust(*([1] * n + ([1] if has_next else []) + [1]))
+    return kb.as_markup()
+
+
+def web_session_detail_kb(session_ref: str) -> InlineKeyboardMarkup:
+    kb = InlineKeyboardBuilder()
+    kb.button(text="🚫 Закрыть", callback_data=f"web:close:{session_ref}")
+    kb.button(text="◀️ Сессии", callback_data="web:sessions")
+    kb.button(text="◀️ WEB",    callback_data="menu:web")
+    kb.adjust(1, 2)
     return kb.as_markup()

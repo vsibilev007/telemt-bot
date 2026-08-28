@@ -801,6 +801,218 @@ def format_tls_fingerprints(d: dict) -> str:
     lines.append(f"\n<i>🕐 {_now_str()}</i>")
     return "\n".join(lines)
 
+
+# ─── WEB Proxy ────────────────────────────────────────────────────────────────
+
+_LIFECYCLE_ICONS = {
+    "running": "🟢",
+    "starting": "🟡",
+    "draining": "🟠",
+    "drained": "🔴",
+    "no_web_listener": "⚪",
+    "deadline_exceeded": "🔴",
+}
+
+_CARRIER_LABELS = {
+    "https": "HTTPS",
+    "https-lanes": "HTTPS Lanes",
+    "websocket": "WebSocket",
+    "websocket-lanes": "WS Lanes",
+}
+
+_STATE_ICONS = {
+    "provisional": "🟡",
+    "committed": "🔵",
+    "healthy": "🟢",
+    "closing": "🔴",
+    "superseded": "⚪",
+    "closed": "⚫",
+}
+
+
+def format_web_status(d: dict) -> str:
+    """Форматирует GET /v1/runtime/web/status."""
+    lifecycle = d.get("lifecycle", "unknown")
+    icon = _LIFECYCLE_ICONS.get(lifecycle, "❓")
+    available = d.get("available", False)
+    age_ms = d.get("lifecycle_age_ms", 0)
+    age_str = f"{age_ms // 60000}м" if age_ms > 60000 else f"{age_ms // 1000}с"
+    listeners = d.get("listeners", [])
+    eff_enabled = d.get("effective_config_enabled", False)
+
+    lines = [
+        f"<b>🌐 WEB Proxy Status</b>",
+        f"{icon} Lifecycle: <b>{lifecycle}</b> ({age_str})",
+        f"Config enabled: {'✅' if eff_enabled else '❌'}",
+    ]
+    if listeners:
+        lines.append(f"Listeners: <code>{', '.join(listeners)}</code>")
+
+    rt = d.get("runtime")
+    if rt:
+        gen = rt.get("generation_id", "?")
+        ri = rt.get("runtime_instance", "")[:12]
+        lines.append(f"\n<b>Runtime</b> (gen {gen}, <code>{ri}…</code>)")
+
+        mgr = rt.get("manager", {})
+        issuance = mgr.get("issuance_enabled", False)
+        lines.append(f"Issuance: {'✅' if issuance else '❌'}")
+
+        limits = rt.get("limits", {})
+        if limits:
+            lines.append(f"Limits: max_sessions={limits.get('max_sessions', '?')}, "
+                         f"max_http_handlers={limits.get('max_http_handlers', '?')}")
+
+        # Stream plane
+        sp = rt.get("stream_plane", {})
+        if sp:
+            active = sp.get("active_streams", 0)
+            total = sp.get("total_streams", 0)
+            lines.append(f"Streams: {active} active / {total} total")
+
+        # Manager plane
+        mp = rt.get("manager_plane", {})
+        if mp:
+            sessions = mp.get("active_sessions", 0)
+            bootstraps = mp.get("active_bootstraps", 0)
+            lines.append(f"Sessions: {sessions} | Bootstraps: {bootstraps}")
+
+        # WebSocket plane
+        wsp = rt.get("websocket_plane", {})
+        if wsp:
+            ws_active = wsp.get("active_connections", 0)
+            ws_total = wsp.get("total_connections", 0)
+            lines.append(f"WebSocket: {ws_active} active / {ws_total} total")
+
+        # Learning plane
+        lp = rt.get("learning_plane", {})
+        if lp:
+            epoch = lp.get("epoch", "?")
+            entries = lp.get("entries", 0)
+            lines.append(f"Learning: epoch={epoch}, entries={entries}")
+
+        # Debug plane
+        dp = rt.get("debug_plane", {})
+        if dp:
+            records = dp.get("records", 0)
+            bytes_held = dp.get("bytes", 0)
+            lines.append(f"Debug: {records} records, {fmt_bytes(bytes_held)}")
+
+        partial = rt.get("partial", [])
+        if partial:
+            lines.append(f"<i>⚠️ Partial: {', '.join(partial)}</i>")
+    elif not available:
+        reason = d.get("reason", "")
+        if reason:
+            lines.append(f"\n❌ {reason}")
+
+    lines.append(f"\n<i>🕐 {_now_str()}</i>")
     return "\n".join(lines)
 
+
+def format_web_sessions(data: dict) -> str:
+    """Форматирует GET /v1/runtime/web/sessions."""
+    sessions = data.get("sessions", [])
+    total = data.get("total", len(sessions))
+    next_cursor = data.get("next_cursor", "")
+    truncated = data.get("scan_truncated", False)
+
+    if not sessions:
+        return (
+            "<b>🌐 WEB Sessions</b>\n\n"
+            "Активных сессий нет.\n\n"
+            f"<i>🕐 {_now_str()}</i>"
+        )
+
+    lines = [
+        f"<b>🌐 WEB Sessions</b> ({total})",
+        "",
+    ]
+
+    for s in sessions[:20]:
+        ref = s.get("session_ref", "?")
+        short_ref = ref.split(".")[-1][:8] if "." in ref else ref[:8]
+        user = s.get("user", "?")
+        ip = s.get("ip", "?")
+        carrier = s.get("carrier", "?")
+        state = s.get("state", "?")
+        streams = s.get("active_streams", 0)
+        age_s = s.get("age_secs", 0)
+        idle_s = s.get("idle_secs", 0)
+
+        state_icon = _STATE_ICONS.get(state, "❓")
+        carrier_label = _CARRIER_LABELS.get(carrier, carrier)
+        age_str = f"{age_s // 60}м" if age_s >= 60 else f"{age_s}с"
+        idle_str = f"{idle_s // 60}м" if idle_s >= 60 else f"{idle_s}с"
+
+        lines.append(
+            f"{state_icon} <code>{short_ref}</code>  "
+            f"<b>{user}</b>  {ip}\n"
+            f"   {carrier_label} | streams={streams} | "
+            f"age={age_str} | idle={idle_str}"
+        )
+
+    if truncated:
+        lines.append(f"\n<i>⚠️ Показано {len(sessions)} из {total} (scan limit)</i>")
+    if next_cursor:
+        lines.append(f"<i>Есть ещё (cursor: {next_cursor[:16]}…)</i>")
+
+    lines.append(f"\n<i>🕐 {_now_str()}</i>")
+    return "\n".join(lines)
+
+
+def format_web_session_detail(d: dict) -> str:
+    """Форматирует GET /v1/runtime/web/sessions/{ref}."""
+    ref = d.get("session_ref", "?")
+    user = d.get("user", "?")
+    ip = d.get("ip", "?")
+    host = d.get("host", "?")
+    carrier = d.get("carrier", "?")
+    state = d.get("state", "?")
+    streams = d.get("active_streams", 0)
+    tasks = d.get("active_tasks", 0)
+    lanes = d.get("active_lanes", 0)
+    ws_conns = d.get("active_websocket_connections", 0)
+    age_s = d.get("age_secs", 0)
+    idle_s = d.get("idle_secs", 0)
+    pending = d.get("pending_bytes", 0)
+    control = d.get("control_bytes", 0)
+    ua = d.get("user_agent", "")
+    key_id = d.get("key_id", "")
+    attempt = d.get("attempt", "")
+    negotiation_left = d.get("negotiation_time_remaining_secs")
+
+    state_icon = _STATE_ICONS.get(state, "❓")
+    carrier_label = _CARRIER_LABELS.get(carrier, carrier)
+
+    lines = [
+        f"<b>🌐 WEB Session</b>",
+        f"Ref: <code>{ref}</code>",
+        f"{state_icon} State: <b>{state}</b>",
+        "",
+        f"👤 User: <b>{user}</b>",
+        f"📍 IP: <code>{ip}</code>",
+        f"🏷 Host: <code>{host}</code>",
+        f"🔗 Carrier: <b>{carrier_label}</b>",
+    ]
+    if attempt:
+        lines.append(f"Attempt: {attempt}")
+
+    lines.append("")
+    lines.append(f"Streams: {streams} | Tasks: {tasks} | Lanes: {lanes}")
+    if ws_conns:
+        lines.append(f"WebSocket connections: {ws_conns}")
+    lines.append(f"Pending: {fmt_bytes(pending)} | Control: {fmt_bytes(control)}")
+    lines.append(f"Age: {age_s // 60}м {age_s % 60}с | Idle: {idle_s}с")
+
+    if ua:
+        ua_short = ua[:60] + ("…" if len(ua) > 60 else "")
+        lines.append(f"UA: <code>{ua_short}</code>")
+    if key_id:
+        lines.append(f"Key: <code>{key_id}</code>")
+    if negotiation_left is not None:
+        lines.append(f"Negotiation left: {negotiation_left}с")
+
+    lines.append(f"\n<i>🕐 {_now_str()}</i>")
+    return "\n".join(lines)
 

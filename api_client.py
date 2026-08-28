@@ -182,6 +182,53 @@ class TelemetClient:
         """GET /v1/runtime/tls-fingerprints?limit=N (3.4.14+)"""
         return await self._request("GET", f"/runtime/tls-fingerprints?limit={limit}")
 
+    # ─── WEB Proxy endpoints ───────────────────────────────────────────────────
+
+    async def get_web_status(self) -> dict:
+        """GET /v1/runtime/web/status — WEB runtime lifecycle и статус"""
+        return await self._request("GET", "/runtime/web/status")
+
+    async def get_web_sessions(self, limit: int = 50, user: str = "", host: str = "",
+                                carrier: str = "", state: str = "",
+                                cursor: str = "") -> dict:
+        """GET /v1/runtime/web/sessions — список активных WEB-сессий"""
+        params = [f"limit={min(limit, 200)}"]
+        if user:
+            params.append(f"user={user}")
+        if host:
+            params.append(f"host={host}")
+        if carrier:
+            params.append(f"carrier={carrier}")
+        if state:
+            params.append(f"state={state}")
+        if cursor:
+            params.append(f"cursor={cursor}")
+        qs = "&".join(params)
+        return await self._request("GET", f"/runtime/web/sessions?{qs}")
+
+    async def get_web_session(self, session_ref: str) -> dict:
+        """GET /v1/runtime/web/sessions/{session_ref} — детали одной сессии"""
+        return await self._request("GET", f"/runtime/web/sessions/{session_ref}")
+
+    async def close_web_sessions(self, runtime_instance: str, selector: dict) -> dict:
+        """POST /v1/runtime/web/sessions/close — закрыть сессии"""
+        body = {"runtime_instance": runtime_instance, "selector": selector}
+        return await self._request("POST", "/runtime/web/sessions/close", json=body)
+
+    async def get_web_operation(self, operation_id: str) -> dict:
+        """GET /v1/runtime/web/operations/{operation_id} — статус операции закрытия"""
+        return await self._request("GET", f"/runtime/web/operations/{operation_id}")
+
+    async def clear_web_debug(self, runtime_instance: str) -> dict:
+        """POST /v1/runtime/web/debug/clear — очистить debug-записи"""
+        return await self._request("POST", "/runtime/web/debug/clear",
+                                   json={"runtime_instance": runtime_instance})
+
+    async def reset_web_carrier_learning(self, runtime_instance: str) -> dict:
+        """POST /v1/runtime/web/carrier-learning/reset — сбросить carrier learning"""
+        return await self._request("POST", "/runtime/web/carrier-learning/reset",
+                                   json={"runtime_instance": runtime_instance})
+
     async def ping(self) -> bool:
         try:
             await self.get_health()

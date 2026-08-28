@@ -38,6 +38,7 @@ from keyboards import (
     config_edit_sections_kb, config_edit_fields_kb, config_edit_confirm_kb, user_delete_confirm_kb, user_detail_kb, user_edit_kb,
     user_links_kb, user_links_kb_no_links, users_delete_expired_confirm_kb,
     users_extra_kb, users_list_kb,
+    web_menu_kb, web_sessions_kb, web_session_detail_kb,
 )
 from qr_utils import make_qr_bytes, link_short_label
 from session import get_client, get_server_index, set_server_index
@@ -1813,6 +1814,7 @@ CONFIG_FIELDS = {
     "upstreams": [],  # Массив — редактируется как целое
     "show_link": [],  # Массив
     "dc_overrides": {},  # Dict
+    "web": {},  # Dict — редактируется как целое (vhosts, profiles, timeouts, limits)
 }
 
 # Кэш текущего конфига для пользователя
@@ -2188,6 +2190,190 @@ async def cmd_reload_status(message: Message, config: Config):
 
     await message.answer("\n".join(lines))
 
+
+# ─── WEB Proxy ────────────────────────────────────────────────────────────────
+
+@router.callback_query(F.data == "menu:web")
+async def cb_web_menu(cq: CallbackQuery, config: Config):
+    """Показать WEB Proxy статус."""
+    client, srv = await get_client(_uid(cq), config)
+    try:
+        data = await client.get_web_status()
+    except ApiError as e:
+        await _safe_edit(cq, f"❌ Ошибка: {e}")
+        return
+    except Exception as e:
+        logger.exception("cb_web_menu error")
+        await _safe_edit(cq, f"❌ Ошибка: {type(e).__name__}: {e}")
+        return
+
+    from formatters import format_web_status
+    await _safe_edit(cq, format_web_status(data), reply_markup=web_menu_kb())
+
+
+@router.callback_query(F.data == "web:status")
+async def cb_web_status(cq: CallbackQuery, config: Config):
+    """Обновить WEB статус."""
+    await cb_web_menu(cq, config)
+
+
+@router.callback_query(F.data == "web:sessions")
+async def cb_web_sessions(cq: CallbackQuery, config: Config):
+    """Показать список WEB-сессий."""
+    client, srv = await get_client(_uid(cq), config)
+    try:
+        data = await client.get_web_sessions(limit=50)
+    except ApiError as e:
+        await _safe_edit(cq, f"❌ Ошибка: {e}")
+        return
+    except Exception as e:
+        logger.exception("cb_web_sessions error")
+        await _safe_edit(cq, f"❌ Ошибка: {type(e).__name__}: {e}")
+        return
+
+    from formatters import format_web_sessions
+    sessions = data.get("sessions", [])
+    has_next = bool(data.get("next_cursor"))
+    await _safe_edit(
+        cq,
+        format_web_sessions(data),
+        reply_markup=web_sessions_kb(sessions, has_next, data.get("next_cursor", "")),
+    )
+
+
+@router.callback_query(F.data.startswith("web:sessions_next:"))
+async def cb_web_sessions_next(cq: CallbackQuery, config: Config):
+    """Пагинация WEB-сессий."""
+    cursor = cq.data.split(":", 2)[2]
+    client, srv = await get_client(_uid(cq), config)
+    try:
+        data = await client.get_web_sessions(limit=50, cursor=cursor)
+    except ApiError as e:
+        await _safe_edit(cq, f"❌ Ошибка: {e}")
+        return
+
+    from formatters import format_web_sessions
+    sessions = data.get("sessions", [])
+    has_next = bool(data.get("next_cursor"))
+    await _safe_edit(
+        cq,
+        format_web_sessions(data),
+        reply_markup=web_sessions_kb(sessions, has_next, data.get("next_cursor", "")),
+    )
+
+
+@router.callback_query(F.data.startswith("web:session:"))
+async def cb_web_session_detail(cq: CallbackQuery, config: Config):
+    """Детали одной WEB-сессии."""
+    session_ref = cq.data.split(":", 2)[2]
+    client, srv = await get_client(_uid(cq), config)
+    try:
+        data = await client.get_web_session(session_ref)
+    except ApiError as e:
+        await _safe_edit(cq, f"❌ Ошибка: {e}")
+        return
+    except Exception as e:
+        logger.exception("cb_web_session_detail error")
+        await _safe_edit(cq, f"❌ Ошибка: {type(e).__name__}: {e}")
+        return
+
+    from formatters import format_web_session_detail
+    await _safe_edit(
+        cq,
+        format_web_session_detail(data),
+        reply_markup=web_session_detail_kb(session_ref),
+    )
+
+
+@router.callback_query(F.data.startswith("web:close:"))
+async def cb_web_close_session(cq: CallbackQuery, config: Config):
+    """Закрыть WEB-сессию."""
+    session_ref = cq.data.split(":", 2)[2]
+    client, srv = await get_client(_uid(cq), config)
+
+    # Получаем runtime_instance из статуса
+    try:
+        status = await client.get_web_status()
+        rt = status.get("runtime", {})
+        runtime_instance = rt.get("runtime_instance", "")
+    except Exception:
+        runtime_instance = ""
+
+    if not runtime_instance:
+        await cq.answer("❌ WEB runtime недоступен", show_alert=True)
+        return
+
+    try:
+        result = await client.close_web_sessions(
+            runtime_instance,
+            {"kind": "refs", "session_refs": [session_ref]},
+        )
+        op_id = result.get("operation_id", "?")
+        await cq.answer(f"✅ Запрос на закрытие (op: {op_id[:8]})", show_alert=True)
+    except ApiError as e:
+        await cq.answer(f"❌ {e.message}", show_alert=True)
+        return
+
+    # Возвращаемся к списку сессий
+    await cb_web_sessions(cq, config)
+
+
+@router.callback_query(F.data == "web:debug_clear")
+async def cb_web_debug_clear(cq: CallbackQuery, config: Config):
+    """Очистить WEB debug-записи."""
+    client, srv = await get_client(_uid(cq), config)
+
+    try:
+        status = await client.get_web_status()
+        rt = status.get("runtime", {})
+        runtime_instance = rt.get("runtime_instance", "")
+    except Exception:
+        runtime_instance = ""
+
+    if not runtime_instance:
+        await cq.answer("❌ WEB runtime недоступен", show_alert=True)
+        return
+
+    try:
+        result = await client.clear_web_debug(runtime_instance)
+        cleared = result.get("records_cleared", 0)
+        await cq.answer(f"✅ Очищено {cleared} записей", show_alert=True)
+    except ApiError as e:
+        await cq.answer(f"❌ {e.message}", show_alert=True)
+        return
+
+    # Обновляем статус
+    await cb_web_menu(cq, config)
+
+
+@router.callback_query(F.data == "web:carrier_reset")
+async def cb_web_carrier_reset(cq: CallbackQuery, config: Config):
+    """Сбросить WEB carrier learning."""
+    client, srv = await get_client(_uid(cq), config)
+
+    try:
+        status = await client.get_web_status()
+        rt = status.get("runtime", {})
+        runtime_instance = rt.get("runtime_instance", "")
+    except Exception:
+        runtime_instance = ""
+
+    if not runtime_instance:
+        await cq.answer("❌ WEB runtime недоступен", show_alert=True)
+        return
+
+    try:
+        result = await client.reset_web_carrier_learning(runtime_instance)
+        cleared = result.get("entries_cleared", 0)
+        await cq.answer(f"✅ Сброшено {cleared} записей", show_alert=True)
+    except ApiError as e:
+        await cq.answer(f"❌ {e.message}", show_alert=True)
+        return
+
+    # Обновляем статус
+    await cb_web_menu(cq, config)
+
+
 #@router.message(Command("alerts"))
 #async def cmd_alerts(message: Message):
 #    await message.answer(
@@ -2344,6 +2530,7 @@ async def cmd_help(message: Message):
         "🔗 <b>Upstreams</b> — RTT и статус апстримов\n"
         "📡 <b>DC / Writers</b> — статус датацентров и ME Writers\n"
         "📤 <b>Бэкап</b> — выгрузка <code>telemt.toml</code> файлом в чат\n"
+        "🌐 <b>WEB Proxy</b> — статус, сессии, debug, carrier learning\n"
         "🔍 <b>Проверить прокси</b> — диагностика узла: DNS, TCP, SSH, Ping, MTProto\n"
         "⚙️ <b>Конфиг</b> — редактирование настроек сервера (General, Timeouts, Censorship…)\n"
         "\n"
