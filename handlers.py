@@ -667,10 +667,12 @@ async def cb_delete_expired(cq: CallbackQuery, config: Config):
         web = cfg.get("web", {})
         vhosts = web.get("vhosts", [])
         if vhosts:
-            profiles = vhosts[0].get("profiles", [])
+            vhost = dict(vhosts[0])
+            profiles = vhost.get("profiles", [])
             new_profiles = [p for p in profiles if p.get("user") not in expired]
             if len(new_profiles) < len(profiles):
-                patch = {"web": {"vhosts": [{"profiles": new_profiles}]}}
+                vhost["profiles"] = new_profiles
+                patch = {"web": {"vhosts": [vhost]}}
                 revision = cfg.get("revision", "")
                 await client.patch_config(patch, if_match=revision, reload="instant")
     except Exception as e:
@@ -1175,10 +1177,13 @@ async def cb_user_delete(cq: CallbackQuery, config: Config):
         web = cfg.get("web", {})
         vhosts = web.get("vhosts", [])
         if vhosts:
-            profiles = vhosts[0].get("profiles", [])
+            # Копируем первый vhost и обновляем profiles
+            vhost = dict(vhosts[0])
+            profiles = vhost.get("profiles", [])
             new_profiles = [p for p in profiles if p.get("user") != username]
             if len(new_profiles) < len(profiles):
-                patch = {"web": {"vhosts": [{"profiles": new_profiles}]}}
+                vhost["profiles"] = new_profiles
+                patch = {"web": {"vhosts": [vhost]}}
                 revision = cfg.get("revision", "")
                 await client.patch_config(patch, if_match=revision, reload="instant")
     except Exception as e:
@@ -1237,7 +1242,8 @@ async def cmd_adduser(message: Message, config: Config):
         web = cfg.get("web", {})
         vhosts = web.get("vhosts", [])
         if vhosts:
-            existing_profiles = vhosts[0].get("profiles", [])
+            vhost = dict(vhosts[0])
+            existing_profiles = vhost.get("profiles", [])
             has_profile = any(p.get("user") == username for p in existing_profiles)
             if not has_profile:
                 new_profiles = existing_profiles + [{
@@ -1247,7 +1253,8 @@ async def cmd_adduser(message: Message, config: Config):
                     "max_streams": 512,
                     "max_streams_per_session": 64,
                 }]
-                patch = {"web": {"vhosts": [{"profiles": new_profiles}]}}
+                vhost["profiles"] = new_profiles
+                patch = {"web": {"vhosts": [vhost]}}
                 revision = cfg.get("revision", "")
                 await client.patch_config(patch, if_match=revision, reload="instant")
     except Exception as e:
@@ -1544,7 +1551,8 @@ async def fsm_create_confirm(message: Message, state: FSMContext, config: Config
         vhosts = web.get("vhosts", [])
         if vhosts:
             # Проверяем, есть ли уже профиль для этого пользователя
-            existing_profiles = vhosts[0].get("profiles", [])
+            vhost = dict(vhosts[0])
+            existing_profiles = vhost.get("profiles", [])
             has_profile = any(p.get("user") == pl["username"] for p in existing_profiles)
             if not has_profile:
                 # Добавляем профиль
@@ -1555,7 +1563,8 @@ async def fsm_create_confirm(message: Message, state: FSMContext, config: Config
                     "max_streams": 512,
                     "max_streams_per_session": 64,
                 }]
-                patch = {"web": {"vhosts": [{"profiles": new_profiles}]}}
+                vhost["profiles"] = new_profiles
+                patch = {"web": {"vhosts": [vhost]}}
                 revision = cfg.get("revision", "")
                 await client.patch_config(patch, if_match=revision, reload="instant")
     except Exception as e:
