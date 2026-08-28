@@ -1,0 +1,6 @@
+# Transitive dependencies - not directly used by telemt-bot
+# msgpack - used by aiogram's msgpack serializer (optional)
+GHSA-6v7p-g79w-8964
+
+# setuptools - build-time dependency only
+CVE-2025-47273
