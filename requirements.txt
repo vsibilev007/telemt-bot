@@ -1,4 +1,4 @@
-aiogram==3.27.0
+aiogram==3.31.0
 aiohttp==3.14.3
 python-dotenv==1.2.2
 qrcode[pil]==8.2
