@@ -657,6 +657,25 @@ async def cb_delete_expired(cq: CallbackQuery, config: Config):
         if (exp := _parse_exp(u.get("expiration_rfc3339", ""))) and exp < now
     ]
 
+    if not expired:
+        await cq.answer("✅ Нет истёкших пользователей")
+        return
+
+    # Удаляем пользователей из WEB-профилей перед удалением
+    try:
+        cfg = await client.get_config()
+        web = cfg.get("web", {})
+        vhosts = web.get("vhosts", [])
+        if vhosts:
+            profiles = vhosts[0].get("profiles", [])
+            new_profiles = [p for p in profiles if p.get("user") not in expired]
+            if len(new_profiles) < len(profiles):
+                patch = {"web": {"vhosts": [{"profiles": new_profiles}]}}
+                revision = cfg.get("revision", "")
+                await client.patch_config(patch, if_match=revision, reload="instant")
+    except Exception as e:
+        logger.warning("Failed to remove WEB profiles for expired users: %s", e)
+
     deleted = errors = 0
     for username in expired:
         results = await cluster_write(members, "delete_user", username)
@@ -1147,8 +1166,23 @@ async def cb_user_delete_confirm(cq: CallbackQuery):
 @router.callback_query(F.data.startswith("user:delete:"))
 async def cb_user_delete(cq: CallbackQuery, config: Config):
     username = cq.data.split(":", 2)[2]
-    _, srv = await get_client(_uid(cq), config)
+    client, srv = await get_client(_uid(cq), config)
     members = config.get_group_members(srv)
+
+    # Сначала удаляем пользователя из WEB-профилей
+    try:
+        cfg = await client.get_config()
+        web = cfg.get("web", {})
+        vhosts = web.get("vhosts", [])
+        if vhosts:
+            profiles = vhosts[0].get("profiles", [])
+            new_profiles = [p for p in profiles if p.get("user") != username]
+            if len(new_profiles) < len(profiles):
+                patch = {"web": {"vhosts": [{"profiles": new_profiles}]}}
+                revision = cfg.get("revision", "")
+                await client.patch_config(patch, if_match=revision, reload="instant")
+    except Exception as e:
+        logger.warning("Failed to remove WEB profile for %s: %s", username, e)
 
     results = await cluster_write(members, "delete_user", username)
 
