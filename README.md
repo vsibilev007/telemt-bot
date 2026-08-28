@@ -2,7 +2,7 @@
 
 Telegram-бот для управления [Telemt MTProxy](https://github.com/telemt/telemt) через Control API v1.
 
-**Совместимость:** Telemt 3.4.14 — 3.4.25
+**Совместимость:** Telemt 3.4.14 — 3.5.5+
 
 ## Возможности
 
@@ -13,6 +13,7 @@ Telegram-бот для управления [Telemt MTProxy](https://github.com/
 - **Мультисервер** — переключение между серверами и кластерами прямо из меню
 - **Диагностика узлов** — DNS, TCP, SSH, Ping, MTProto проверки с агентами
 - **Ссылки с SNI** — домены маскировки отображаются над каждым прокси
+- **WEB Proxy** — управление WEB-режимом прокси (Telemt 3.5.5+): статус, сессии, debug, carrier learning
 - **Редактирование конфига** — изменение настроек через бота (PATCH /v1/config)
 - **Runtime reload** — перезагрузка конфигурации без перезапуска процесса (3.4.25+)
 - **Lite режим** — минимальный набор функций без алертов и графиков
@@ -496,6 +497,52 @@ systemctl restart telemt-bot
   🇪🇺 EU — TCP: 🟢 56 мс  |  MTProto: 🟢 3665 мс
   🇷🇺 RU — TCP: 🟢 4 мс   |  TLS: 🟢 185 мс
 ```
+
+---
+
+## WEB Proxy (Telemt 3.5.5+)
+
+Бот поддерживает управление WEB-режимом прокси — технология, которая проксирует MTProto трафик через HTTPS/WebSocket, совместимый с типом прокси `WEB` в Telegram Desktop.
+
+### Возможности
+
+- **Статус** — lifecycle, runtime, limits, streams, sessions, learning, debug
+- **Сессии** — список активных WEB-сессий с пагинацией и деталями
+- **Управление** — закрытие сессий, очистка debug, сброс carrier learning
+- **Ссылки** — автоматическая генерация `tg://webproxy` ссылок для пользователей
+- **Авто-профили** — при создании/удалении пользователя WEB-профиль обновляется автоматически
+
+### Меню WEB Proxy
+
+| Кнопка | Описание |
+|--------|----------|
+| 📊 Статус | WEB runtime lifecycle, limits, streams, sessions |
+| 👥 Сессии | Список активных сессий с фильтрами |
+| 🧹 Очистить debug | Очистка debug-записей |
+| 🔄 Сброс learning | Сброс carrier learning evidence |
+
+### Ссылки
+
+Для серверов с Telemt 3.5.5+ бот генерирует WEB-ссылки:
+
+```
+WEB Proxy:
+🌐 list.lympik.ru
+tg://webproxy?server=list.lympik.ru&secret=dd...
+```
+
+Для серверов с Telemt 3.4.25 и ниже — только TLS-ссылки (старый формат).
+
+### API endpoints
+
+| Endpoint | Описание |
+|----------|----------|
+| `GET /v1/runtime/web/status` | WEB runtime lifecycle и статус |
+| `GET /v1/runtime/web/sessions` | Список активных сессий |
+| `GET /v1/runtime/web/sessions/{ref}` | Детали одной сессии |
+| `POST /v1/runtime/web/sessions/close` | Закрытие сессий |
+| `POST /v1/runtime/web/debug/clear` | Очистка debug |
+| `POST /v1/runtime/web/carrier-learning/reset` | Сброс carrier learning |
 
 ---
 
