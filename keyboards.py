@@ -462,14 +462,16 @@ def web_sessions_kb(sessions: list, has_next: bool = False, next_cursor: str = "
     kb = InlineKeyboardBuilder()
     for s in sessions[:10]:
         ref = s.get("session_ref", "")
-        short = ref.split(".")[-1][:8] if "." in ref else ref[:8]
+        # Используем только последнюю часть ID (16 hex) для callback data
+        short_id = ref.split(".")[-1] if "." in ref else ref
         user = s.get("user", "?")
         state = s.get("state", "?")
         icon = {"healthy": "🟢", "committed": "🔵", "provisional": "🟡",
                 "closing": "🔴"}.get(state, "⚪")
-        kb.button(text=f"{icon} {user} ({short})", callback_data=f"web:session:{ref}")
+        kb.button(text=f"{icon} {user} ({short_id[:8]})", callback_data=f"web:s:{short_id}")
     if has_next and next_cursor:
-        kb.button(text="▶️ Ещё", callback_data=f"web:sessions_next:{next_cursor}")
+        # Сокращаем cursor до 32 символов
+        kb.button(text="▶️ Ещё", callback_data=f"web:n:{next_cursor[:32]}")
     kb.button(text="◀️ WEB", callback_data="menu:web")
     n = min(len(sessions), 10)
     kb.adjust(*([1] * n + ([1] if has_next else []) + [1]))
@@ -478,7 +480,9 @@ def web_sessions_kb(sessions: list, has_next: bool = False, next_cursor: str = "
 
 def web_session_detail_kb(session_ref: str) -> InlineKeyboardMarkup:
     kb = InlineKeyboardBuilder()
-    kb.button(text="🚫 Закрыть", callback_data=f"web:close:{session_ref}")
+    # Используем только последнюю часть ID
+    short_id = session_ref.split(".")[-1] if "." in session_ref else session_ref
+    kb.button(text="🚫 Закрыть", callback_data=f"web:c:{short_id}")
     kb.button(text="◀️ Сессии", callback_data="web:sessions")
     kb.button(text="◀️ WEB",    callback_data="menu:web")
     kb.adjust(1, 2)

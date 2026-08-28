@@ -2261,7 +2261,7 @@ async def cb_web_sessions(cq: CallbackQuery, config: Config):
     )
 
 
-@router.callback_query(F.data.startswith("web:sessions_next:"))
+@router.callback_query(F.data.startswith("web:n:"))
 async def cb_web_sessions_next(cq: CallbackQuery, config: Config):
     """Пагинация WEB-сессий."""
     cursor = cq.data.split(":", 2)[2]
@@ -2282,11 +2282,23 @@ async def cb_web_sessions_next(cq: CallbackQuery, config: Config):
     )
 
 
-@router.callback_query(F.data.startswith("web:session:"))
+@router.callback_query(F.data.startswith("web:s:"))
 async def cb_web_session_detail(cq: CallbackQuery, config: Config):
     """Детали одной WEB-сессии."""
-    session_ref = cq.data.split(":", 2)[2]
+    short_id = cq.data.split(":", 2)[2]
     client, srv = await get_client(_uid(cq), config)
+
+    # Получаем runtime_instance для восстановления полного session_ref
+    try:
+        status = await client.get_web_status()
+        rt = status.get("runtime", {})
+        runtime_instance = rt.get("runtime_instance", "")
+    except Exception:
+        runtime_instance = ""
+
+    # Восстанавливаем полный session_ref
+    session_ref = f"ws1.{runtime_instance}.{short_id}" if runtime_instance else short_id
+
     try:
         data = await client.get_web_session(session_ref)
     except ApiError as e:
@@ -2305,11 +2317,22 @@ async def cb_web_session_detail(cq: CallbackQuery, config: Config):
     )
 
 
-@router.callback_query(F.data.startswith("web:close:"))
+@router.callback_query(F.data.startswith("web:c:"))
 async def cb_web_close_session(cq: CallbackQuery, config: Config):
     """Закрыть WEB-сессию."""
-    session_ref = cq.data.split(":", 2)[2]
+    short_id = cq.data.split(":", 2)[2]
     client, srv = await get_client(_uid(cq), config)
+
+    # Получаем runtime_instance для восстановления полного session_ref
+    try:
+        status = await client.get_web_status()
+        rt = status.get("runtime", {})
+        runtime_instance = rt.get("runtime_instance", "")
+    except Exception:
+        runtime_instance = ""
+
+    # Восстанавливаем полный session_ref
+    session_ref = f"ws1.{runtime_instance}.{short_id}" if runtime_instance else short_id
 
     # Получаем runtime_instance из статуса
     try:
