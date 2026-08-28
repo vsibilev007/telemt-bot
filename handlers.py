@@ -1196,6 +1196,29 @@ async def cmd_adduser(message: Message, config: Config):
     result = ok_results[0].data
     user = result.get("user", result)
     all_links = _get_all_links(user)
+
+    # Автоматически добавляем пользователя в WEB-профили
+    try:
+        cfg = await client.get_config()
+        web = cfg.get("web", {})
+        vhosts = web.get("vhosts", [])
+        if vhosts:
+            existing_profiles = vhosts[0].get("profiles", [])
+            has_profile = any(p.get("user") == username for p in existing_profiles)
+            if not has_profile:
+                new_profiles = existing_profiles + [{
+                    "user": username,
+                    "secret_mode": "dd",
+                    "max_sessions": 8,
+                    "max_streams": 512,
+                    "max_streams_per_session": 64,
+                }]
+                patch = {"web": {"vhosts": [{"profiles": new_profiles}]}}
+                revision = cfg.get("revision", "")
+                await client.patch_config(patch, if_match=revision, reload="instant")
+    except Exception as e:
+        logger.warning("Failed to add WEB profile for %s: %s", username, e)
+
     status = ""
     if len(members) > 1:
         status = "\n" + _format_cluster_result(results)
@@ -1479,6 +1502,30 @@ async def fsm_create_confirm(message: Message, state: FSMContext, config: Config
     result = ok_results[0].data
     user = result.get("user", result)
     secret = result.get("secret", pl.get("secret", "—"))
+
+    # Автоматически добавляем пользователя в WEB-профили
+    try:
+        cfg = await client.get_config()
+        web = cfg.get("web", {})
+        vhosts = web.get("vhosts", [])
+        if vhosts:
+            # Проверяем, есть ли уже профиль для этого пользователя
+            existing_profiles = vhosts[0].get("profiles", [])
+            has_profile = any(p.get("user") == pl["username"] for p in existing_profiles)
+            if not has_profile:
+                # Добавляем профиль
+                new_profiles = existing_profiles + [{
+                    "user": pl["username"],
+                    "secret_mode": "dd",
+                    "max_sessions": 8,
+                    "max_streams": 512,
+                    "max_streams_per_session": 64,
+                }]
+                patch = {"web": {"vhosts": [{"profiles": new_profiles}]}}
+                revision = cfg.get("revision", "")
+                await client.patch_config(patch, if_match=revision, reload="instant")
+    except Exception as e:
+        logger.warning("Failed to add WEB profile for %s: %s", pl["username"], e)
 
     status_text = "\n\n<b>Статус по узлам:</b>\n" + _format_cluster_result(results) if len(members) > 1 else ""
     if fail_results:
