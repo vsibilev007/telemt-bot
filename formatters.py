@@ -43,6 +43,28 @@ def _extract_sni_from_link(link: str) -> str:
     return ""
 
 
+def _extract_secret_from_link(link: str) -> str:
+    """Извлекает 16-байтовый секрет из tg://proxy ссылки (без ee/dd префикса)."""
+    try:
+        parsed = urllib.parse.urlparse(link)
+        params = urllib.parse.parse_qs(parsed.query)
+        secret_hex = params.get("secret", [""])[0]
+        if not secret_hex or len(secret_hex) < 34:
+            return ""
+        # ee/dd + 32 hex (16 bytes) + SNI
+        secret_bytes = bytes.fromhex(secret_hex[:34])
+        if secret_bytes[0] in (0xee, 0xdd):
+            return secret_hex[2:34]  # 32 hex chars = 16 bytes
+    except Exception:
+        pass
+    return ""
+
+
+def make_webproxy_link(hostname: str, secret_hex: str, mode: str = "dd") -> str:
+    """Генерирует tg://webproxy ссылку для WEB-режима."""
+    return f"tg://webproxy?server={hostname}&secret={mode}{secret_hex}"
+
+
 def _epoch_to_str(epoch: int) -> str:
     return _tz.fmt_datetime(epoch)
 
@@ -351,8 +373,9 @@ def format_users_quota(data: dict) -> str:
     return "\n".join(lines)
 
 
-def format_user_links(u: dict) -> tuple[str, list[str]]:
-    """Возвращает (текст-заголовок, список ссылок) с доменами маскировки"""
+def format_user_links(u: dict, web_config: dict = None) -> tuple[str, list[str]]:
+    """Возвращает (текст-заголовок, список ссылок) с доменами маскировки.
+    Если web_config передан — добавляет WEB-ссылки tg://webproxy."""
     username = u.get("username", "?")
     links_data = u.get("links", {})
     classic = links_data.get("classic", [])
@@ -364,6 +387,31 @@ def format_user_links(u: dict) -> tuple[str, list[str]]:
         return f"<b>🔗 Ссылки — {username}</b>\n\n— нет ссылок —", []
 
     parts = [f"<b>🔗 Ссылки — {username}</b>"]
+
+    # WEB-ссылки (tg://webproxy)
+    web_links = []
+    if web_config:
+        vhosts = web_config.get("vhosts", [])
+        for vh in vhosts:
+            hostname = vh.get("host", "")
+            profiles = vh.get("profiles", [])
+            for prof in profiles:
+                if prof.get("user") == username:
+                    mode = prof.get("secret_mode", "dd")
+                    # Извлекаем секрет из TLS-ссылок
+                    for link in tls_links:
+                        secret = _extract_secret_from_link(link)
+                        if secret:
+                            web_link = make_webproxy_link(hostname, secret, mode)
+                            web_links.append((hostname, web_link))
+                            break  # Один секрет на профиль
+                    break  # Один профиль на vhost
+
+    if web_links:
+        parts.append("\n<b>WEB Proxy:</b>")
+        for hostname, link in web_links:
+            parts.append(f"🌐 <b>{hostname}</b>")
+            parts.append(f"<code>{link}</code>")
 
     if classic:
         parts.append("\n<b>Classic:</b>")
@@ -384,7 +432,7 @@ def format_user_links(u: dict) -> tuple[str, list[str]]:
             parts.append(f"<code>{link}</code>")
 
     parts.append("\n<i>Нажмите на ссылку, чтобы скопировать</i>")
-    return "\n".join(parts), all_links
+    return "\n".join(parts), all_links + [wl[1] for wl in web_links]
 
 
 # ─── Runtime ──────────────────────────────────────────────────────────────────

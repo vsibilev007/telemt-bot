@@ -991,7 +991,14 @@ async def cb_user_links(cq: CallbackQuery, config: Config):
         await _safe_edit(cq, f"<b>🔗 Ссылки — {username}</b>\n\n— нет ссылок —",
                          reply_markup=user_links_kb_no_links(username))
         return
-    text, _ = format_user_links(user)
+    # Получаем WEB-конфиг для генерации tg://webproxy ссылок
+    web_config = None
+    try:
+        cfg = await client.get_config()
+        web_config = cfg.get("web", {})
+    except Exception:
+        pass
+    text, _ = format_user_links(user, web_config)
     await _safe_edit(cq, text, reply_markup=user_links_kb(username, all_links))
 
 
@@ -1046,7 +1053,14 @@ async def cb_qr_back_links(cq: CallbackQuery, config: Config):
     if user is None:
         return
     all_links = _get_all_links(user)
-    text, _ = format_user_links(user)
+    # Получаем WEB-конфиг для генерации tg://webproxy ссылок
+    web_config = None
+    try:
+        cfg = await client.get_config()
+        web_config = cfg.get("web", {})
+    except Exception:
+        pass
+    text, _ = format_user_links(user, web_config)
     await cq.bot.send_message(
         chat_id=cq.message.chat.id,
         text=text,
