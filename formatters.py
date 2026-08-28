@@ -373,10 +373,22 @@ def format_users_quota(data: dict) -> str:
     return "\n".join(lines)
 
 
-def format_user_links(u: dict, web_config: dict = None) -> tuple[str, list[str]]:
+def _version_tuple(v: str) -> tuple[int, ...]:
+    """Парсит версию '3.4.25' в (3, 4, 25) для сравнения."""
+    try:
+        return tuple(int(x) for x in v.split("."))
+    except (ValueError, AttributeError):
+        return (0, 0, 0)
+
+
+# Минимальная версия Telemt для WEB Proxy
+WEB_PROXY_MIN_VERSION = (3, 5, 5)
+
+
+def format_user_links(u: dict, web_config: dict = None, telemt_version: str = "") -> tuple[str, list[str]]:
     """Возвращает (текст-заголовок, список ссылок) с доменами маскировки.
-    Если web_config передан — добавляет WEB-ссылки tg://webproxy.
-    TLS-ссылки с внутренним адресом (127.0.0.1) скрываются если есть WEB-ссылки."""
+    WEB-ссылки tg://webproxy только для Telemt >= 3.5.5.
+    Для старых версий — только TLS-ссылки."""
     username = u.get("username", "?")
     links_data = u.get("links", {})
     classic = links_data.get("classic", [])
@@ -389,9 +401,10 @@ def format_user_links(u: dict, web_config: dict = None) -> tuple[str, list[str]]
 
     parts = [f"<b>🔗 Ссылки — {username}</b>"]
 
-    # WEB-ссылки (tg://webproxy)
+    # WEB-ссылки (tg://webproxy) — только для Telemt >= 3.5.5
     web_links = []
-    if web_config:
+    has_web_support = _version_tuple(telemt_version) >= WEB_PROXY_MIN_VERSION
+    if web_config and has_web_support:
         vhosts = web_config.get("vhosts", [])
         for vh in vhosts:
             hostname = vh.get("host", "")
@@ -424,8 +437,7 @@ def format_user_links(u: dict, web_config: dict = None) -> tuple[str, list[str]]
         for link in secure:
             parts.append(f"<code>{link}</code>")
 
-    # TLS-ссылки показываем только если нет WEB-ссылок
-    # (TLS-ссылки с 127.0.0.1 не работают снаружи)
+    # TLS-ссылки: показываем если нет WEB-ссылок ИЛИ если версия < 3.5.5
     if tls_links and not web_links:
         parts.append("\n<b>TLS:</b>")
         for link in tls_links:
