@@ -2,7 +2,7 @@ services:
   bot:
     # Готовый образ из GHCR. Замени OWNER или задай GHCR_OWNER в окружении.
     # Для локальной сборки закомментируй image и раскомментируй build.
-    image: ghcr.io/${GHCR_OWNER:-owner}/telemt-bot:latest
+    image: ghcr.io/${GHCR_OWNER:-vsibilev007}/telemt-bot:latest
     # build: .
     container_name: telemt-bot
     restart: unless-stopped

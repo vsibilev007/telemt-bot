@@ -36,7 +36,7 @@ Telegram-бот для управления [Telemt MTProxy](https://github.com/
 
 ```bash
 # Скачать образ вручную (опционально)
-docker pull ghcr.io/ddark008/telemt-bot:latest
+docker pull ghcr.io/vsibilev007/telemt-bot:latest
 ```
 
 ### 1. Создать `.env`
@@ -49,7 +49,7 @@ nano .env          # заполни BOT_TOKEN, ALLOWED_USERS, SERVER_URL
 ### 2. Запустить через Docker Compose
 
 ```bash
-curl -O https://raw.githubusercontent.com/ddark008/telemt-bot/main/docker-compose.yml
+curl -O https://raw.githubusercontent.com/vsibilev007/telemt-bot/main/docker-compose.yml
 docker compose up -d
 ```
 
