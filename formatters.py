@@ -437,8 +437,8 @@ def format_user_links(u: dict, web_config: dict = None, telemt_version: str = ""
         for link in secure:
             parts.append(f"<code>{link}</code>")
 
-    # TLS-ссылки: показываем если нет WEB-ссылок ИЛИ если версия < 3.5.5
-    if tls_links and not web_links:
+    # TLS-ссылки показываем всегда (WEB Proxy доступен не на всех платформах)
+    if tls_links:
         parts.append("\n<b>TLS:</b>")
         for link in tls_links:
             sni = _extract_sni_from_link(link)
