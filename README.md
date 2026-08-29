@@ -1,583 +1,107 @@
 # Telemt Manager Bot
 
-Telegram-бот для управления [Telemt MTProxy](https://github.com/telemt/telemt) через Control API v1.
+[![Docker](https://github.com/vsibilev007/telemt-bot/actions/workflows/docker.yml/badge.svg)](https://github.com/vsibilev007/telemt-bot/actions/workflows/docker.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
-**Совместимость:** Telemt 3.4.14 — 3.5.5+
+> Telegram bot for managing [Telemt MTProxy](https://github.com/telemt/telemt) servers via Control API v1.
 
-## Возможности
+**Compatibility:** Telemt 3.4.14 — 3.5.5+
 
-- **Управление клиентами** — создание, редактирование, удаление, QR-коды, история трафика с графиками
-- **Мониторинг** — дашборд, runtime, безопасность, DC/Writers, upstreams
-- **Алерты** — 10 типов событий с настраиваемыми порогами и cooldown
-- **Кластер HA** — write-операции на все узлы параллельно, агрегированное чтение
-- **Мультисервер** — переключение между серверами и кластерами прямо из меню
-- **Диагностика узлов** — DNS, TCP, SSH, Ping, MTProto проверки с агентами
-- **Ссылки с SNI** — домены маскировки отображаются над каждым прокси
-- **WEB Proxy** — управление WEB-режимом прокси (Telemt 3.5.5+): статус, сессии, debug, carrier learning
-- **Редактирование конфига** — изменение настроек через бота (PATCH /v1/config)
-- **Runtime reload** — перезагрузка конфигурации без перезапуска процесса (3.4.25+)
-- **Lite режим** — минимальный набор функций без алертов и графиков
+[🇷🇺 README на русском](README.ru.md)
 
 ---
 
-## Требования
-
-| Компонент | Версия | Обязательно |
-|-----------|--------|-------------|
-| Python | 3.11+ | Да |
-| Telemt MTProxy | с Control API | Да |
-| matplotlib | — | Для графиков |
-| telethon + python-socks | — | Для MTProto-проверки прокси |
-
----
-
-## Быстрый старт через Docker
-
-Готовый образ публикуется на GitHub Container Registry после каждого мержа в `main` и при создании тега `v*.*.*`.
+## Quick Start
 
 ```bash
-# Скачать образ вручную (опционально)
-docker pull ghcr.io/vsibilev007/telemt-bot:latest
-```
-
-### 1. Создать `.env`
-
-```bash
-cp .env.example .env
-nano .env          # заполни BOT_TOKEN, ALLOWED_USERS, SERVER_URL
-```
-
-### 2. Запустить через Docker Compose
-
-```bash
+# One-line Docker setup
 curl -O https://raw.githubusercontent.com/vsibilev007/telemt-bot/main/docker-compose.yml
+cp .env.example .env && nano .env
 docker compose up -d
 ```
 
-По умолчанию `docker-compose.yml` тянет образ с GHCR. Если хочешь собрать локально — закомментируй строку `image:` и раскомментируй `build: .`.
-
-### Доступные теги
-
-| Тег | Описание |
-|-----|----------|
-| `latest` | Последний коммит в `main` |
-| `v1.2.3` | Конкретная версия |
-| `1.2` | Последний патч в мажоре |
-| `sha-abc1234` | Конкретный коммит |
-
-### Данные и том
-
-База данных хранится в named volume `telemt-data` (путь внутри контейнера — `/data`). **Не используй bind-mount** (`./data:/data`) — это перетирает права `appuser` и вызывает `unable to open database file`.
-
-```bash
-# Посмотреть данные
-docker volume inspect telemt-data
-
-# Бэкап тома
-docker run --rm -v telemt-data:/data -v $(pwd):/backup alpine \
-  tar czf /backup/telemt-data.tar.gz -C /data .
-```
-
-### Бэкап telemt.toml
-
-Кнопка **📤 Бэкап** в меню отправляет файл `telemt.toml` прямо в чат. В Docker контейнер не видит хостовый `/etc/telemt/telemt.toml` — нужно явно смонтировать файл.
-
-**Шаг 1 — выставить права на хосте:**
-
-```bash
-chown 10001 /etc/telemt/telemt.toml
-chmod 640 /etc/telemt/telemt.toml
-```
-
-Контейнер запускается как `appuser` (UID 10001) — файл должен быть ему доступен для чтения.
-
-**Шаг 2 — раскомментировать mount в `docker-compose.yml`:**
-
-```yaml
-volumes:
-  - telemt-data:/data
-  - /etc/telemt/telemt.toml:/etc/telemt/telemt.toml:ro  # ← раскомментировать
-```
-
-Если `telemt.toml` лежит в другом месте — укажи путь через переменную окружения в `.env`:
-
-```env
-TELEMT_CONFIG_PATH=/path/to/telemt.toml
-```
-
-И соответственно поменяй левую часть mount:
-
-```yaml
-- /path/to/telemt.toml:/etc/telemt/telemt.toml:ro
-```
-
-> **Альтернатива без изменения владельца:** используй POSIX ACL (требует пакет `acl`):
-> ```bash
-> setfacl -m u:10001:r /etc/telemt/telemt.toml
-> ```
-
-### Локальная сборка
-
-```bash
-docker build -t telemt-bot .
-docker run -d --env-file .env -v telemt-data:/data --name telemt-bot telemt-bot
-```
-
-### Параметры безопасности (включены в compose)
-
-- `read_only: true` — файловая система контейнера только для чтения
-- `cap_drop: ALL` — сброс всех Linux capabilities
-- `no-new-privileges: true` — запрет эскалации привилегий
-- `mem_limit: 256m`, `pids_limit: 256` — лимиты ресурсов
-- Non-root пользователь `appuser` (UID 10001)
+- [Quick Start Guide](docs/QUICKSTART.en.md)
+- [Инструкция по быстрому запуску](docs/QUICKSTART.ru.md)
 
 ---
 
-## Установка на свежей системе
+## Features
 
-### 1. Установить Python и зависимости
-
-**Ubuntu / Debian:**
-
-```bash
-sudo apt update && sudo apt install -y python3 python3-venv python3-pip git
-```
-
-**CentOS / RHEL / AlmaLinux:**
-
-```bash
-sudo dnf install -y python3 python3-pip git
-```
-
-**Alpine:**
-
-```bash
-sudo apk add python3 py3-pip git
-```
-
-### 2. Клонировать репозиторий
-
-```bash
-git clone https://github.com/vsibilev007/telemt-bot.git
-cd telemt-bot
-```
-
-### 3. Создать виртуальное окружение и установить зависимости
-
-```bash
-python3 -m venv venv
-source venv/bin/activate
-pip install -r requirements.txt
-```
-
-### 4. Настроить конфигурацию
-
-```bash
-cp .env.example .env
-nano .env
-```
-
-Заполни обязательные параметры:
-
-```env
-BOT_TOKEN=1234567890:AABBCCDDEEFFaabbccddeeff
-ALLOWED_USERS=123456789
-SERVER_URL=http://127.0.0.1:9091
-SERVER_NAME=My Telemt
-SERVER_AUTH=
-```
-
-> `BOT_TOKEN` — получить у [@BotFather](https://t.me/BotFather).
-> `ALLOWED_USERS` — Telegram user_id через запятую. Узнать: [@userinfobot](https://t.me/userinfobot).
-> `SERVER_URL` — адрес Control API Telemt (по умолчанию `127.0.0.1:9091`).
-
-### 5. Запустить
-
-```bash
-source venv/bin/activate
-python bot.py
-```
-
-Бот готов. Открой его в Telegram и нажми `/start`.
-
----
-
-## Установка как systemd-сервис
-
-### Бот
-
-Создай файл `/etc/systemd/system/telemt-bot.service`:
-
-```ini
-[Unit]
-Description=Telemt Manager Bot
-After=network.target
-
-[Service]
-Type=simple
-User=root
-WorkingDirectory=/opt/telemt-bot
-EnvironmentFile=/opt/telemt-bot/.env
-ExecStart=/opt/telemt-bot/venv/bin/python bot.py
-Restart=on-failure
-RestartSec=5
-
-[Install]
-WantedBy=multi-user.target
-```
-
-> Замени `/opt/telemt-bot/telemt-bot` на реальный путь к проекту.
-
-```bash
-systemctl daemon-reload
-systemctl enable --now telemt-bot
-journalctl -u telemt-bot -f
-```
-
-### Агент проверки прокси (опционально)
-
-Агент нужен, если хочешь проверять доступность прокси с дополнительных серверов (RU, Asia и т.д.). Агент — отдельный скрипт `proxy_agent.py` без внешних зависимостей.
-
-Скопируй `proxy_agent.py` на удалённый сервер и создай файл `/etc/systemd/system/proxy-agent.service`:
-
-```ini
-[Unit]
-Description=Proxy Check Agent
-After=network.target
-
-[Service]
-Type=simple
-User=root
-ExecStart=/usr/bin/python3 /opt/telemt-bot/proxy_agent.py --host 0.0.0.0 --port 8765 --token YOUR_TOKEN
-Restart=on-failure
-RestartSec=5
-
-[Install]
-WantedBy=multi-user.target
-```
-
-```bash
-systemctl daemon-reload
-systemctl enable --now proxy-agent
-```
-
-На основном сервере добавь в `.env`:
-
-```env
-AGENT_1_URL=http://IP_АГЕНТА:8765
-AGENT_1_NAME=RU
-AGENT_1_TOKEN=YOUR_TOKEN
-AGENT_1_FLAG=🇷🇺
-```
-
----
-
-## Конфигурация (`.env`)
-
-### Обязательные
-
-| Переменная | Описание |
-|------------|----------|
-| `BOT_TOKEN` | Токен бота от @BotFather |
-| `ALLOWED_USERS` | Telegram user_id через запятую |
-
-### Серверы
-
-**Один сервер:**
-
-```env
-SERVER_URL=http://127.0.0.1:9091
-SERVER_NAME=My Telemt
-SERVER_AUTH=
-```
-
-**Несколько серверов:**
-
-```env
-SERVER_1_URL=http://10.0.0.1:9091
-SERVER_1_NAME=Main
-SERVER_1_AUTH=secret1
-
-SERVER_2_URL=http://10.0.0.2:9091
-SERVER_2_NAME=Backup
-SERVER_2_AUTH=secret2
-```
-
-**Кластер HA** — серверы с одинаковым `GROUP`:
-
-```env
-SERVER_1_URL=http://10.0.0.1:9091
-SERVER_1_NAME=HA_A
-SERVER_1_GROUP=cluster_ha
-
-SERVER_2_URL=http://10.0.0.2:9091
-SERVER_2_NAME=HA_B
-SERVER_2_GROUP=cluster_ha
-```
-
-### Прочие параметры
-
-| Переменная | Описание | По умолчанию |
-|------------|----------|--------------|
-| `TZ` | Часовой пояс | системный |
-| `LITE_MODE` | Минимальный режим | `false` |
-| `LOG_LEVEL` | Уровень логов | `INFO` |
-| `LOG_FILE` | Файл логов | — (stdout) |
-| `LOG_MAX_MB` | Макс. размер файла | `10` |
-| `LOG_BACKUPS` | Кол-во бэкапов | `3` |
-| `NO_COLOR` | Отключить ANSI | — |
-| `TELEMT_CONFIG_PATH` | Путь к telemt.toml | `/etc/telemt/telemt.toml` |
-| `TELEGRAM_PROXY_URL` | Прокси для Telegram API | — |
-
-### Пороги алертов
-
-```env
-ALERT_CONN_SPIKE_PCT=50        # всплеск соединений, %
-ALERT_CONN_SPIKE_MIN_BASE=100  # мин. база для срабатывания
-ALERT_WRITERS_LOW_PCT=80       # порог ME Writers coverage, %
-ALERT_HS_TIMEOUT_SPIKE=50      # handshake timeout, +N за 2 мин
-ALERT_BAD_CLIENT_SPIKE=100     # плохих TLS, +N за 2 мин
-ALERT_QUOTA_PCT=80             # порог квоты клиента, %
-```
-
-### Прокси для Telegram API
-
-```env
-TELEGRAM_PROXY_URL=socks5://user:password@host:port
-TELEGRAM_PROXY_URL=http://host:port
-```
-
-Поддержка SOCKS5, SOCKS4, HTTP. Логин/пароль скрывается в логах.
-
----
-
-## Lite режим
-
-`LITE_MODE=true` — минимальный набор без графиков и алертов:
-
-| Остаётся | Отключается |
+| Category | Capabilities |
 |----------|-------------|
-| 🟢 Состояние сервера | 📊 Отчёт по трафику |
-| 👥 Клиенты | ⚠️ Истекающие |
-| ➕ Создание клиентов | 🔒 Безопасность, Upstreams, DC/Writers |
-| ⚡ Runtime | 🔍 Проверка прокси |
-| 📤 Бэкап | 🔔 Алерты и scheduler |
+| **Client Management** | Create, edit, delete users; QR codes; traffic history with charts |
+| **Monitoring** | Dashboard, runtime, security, DC/Writers, upstreams |
+| **Alerts** | 10 event types with configurable thresholds and cooldowns |
+| **HA Cluster** | Parallel write operations across nodes, aggregated reads |
+| **Multi-Server** | Switch between servers and clusters from the menu |
+| **Node Diagnostics** | DNS, TCP, SSH, Ping, MTProto checks with remote agents |
+| **WEB Proxy** | Status, sessions, debug, carrier learning management (Telemt 3.5.5+) |
+| **Config Editor** | Modify server settings via bot (PATCH /v1/config) |
+| **Runtime Reload** | Reload configuration without process restart (Telemt 3.4.25+) |
+| **Lite Mode** | Minimal feature set without alerts and charts |
 
 ---
 
-## Команды
+## Documentation
 
-| Команда | Описание |
-|---------|----------|
-| `/start` | Приветствие и главное меню |
-| `/menu` | Главное меню |
-| `/help` | Справка |
-| `/adduser имя [дней]` | Быстро создать клиента |
-| `/find запрос` | Поиск клиента по имени |
-| `/check tg://proxy?...` | Диагностика узла (DNS, TCP, SSH, Ping, MTProto) |
-| `/reload [instant\|drain]` | Runtime reload без перезапуска (3.4.25+) |
-| `/reload_status <id>` | Статус reload операции |
-| `/alerts` | Настройки алертов |
-| `/alert_log` | История последних 20 алертов |
-| `/id` | Ваш Telegram ID |
-| `/status` | Статус всех серверов |
+- [Quick Start Guide](docs/QUICKSTART.en.md)
+- [Configuration Reference](docs/CONFIGURATION.en.md)
+- [Deployment Guide](docs/DEPLOYMENT.en.md)
+- [WEB Proxy Setup](docs/WEB-PROXY.en.md)
+- [Proxy Agent Setup](docs/PROXY-AGENT.en.md)
 
 ---
 
-## Алерты
+## Commands
 
-| Тип | Событие | Cooldown |
-|-----|---------|----------|
-| `status_down` | Сервер недоступен | 5 мин |
-| `status_up` | Сервер восстановился | — |
-| `conn_spike` | Всплеск соединений >50% | 2 мин |
-| `writers_low` | ME Writers coverage <80% | 2 мин |
-| `version_change` | Обновление версии telemt | — |
-| `bad_unknown_sni` | Неизвестный TLS SNI | 5 мин |
-| `hs_timeout_spike` | Handshake timeout +50 за 2 мин | 2 мин |
-| `bad_client_spike` | Плохих TLS клиентов +100 за 2 мин | 2 мин |
-| `hs_conn_reset` | Сброс при handshake | 5 мин |
-| `quota_warn` | Клиент использовал ≥80% квоты | 1 час |
-
-Настройка через `/alerts`, история через `/alert_log`.
+| Command | Description |
+|---------|-------------|
+| `/start` | Welcome and main menu |
+| `/menu` | Main menu |
+| `/help` | Help |
+| `/adduser name [days]` | Quick create client |
+| `/find query` | Search client by name |
+| `/check tg://proxy?...` | Node diagnostics |
+| `/reload [instant\|drain]` | Runtime reload (3.4.25+) |
+| `/alerts` | Alert settings |
+| `/id` | Your Telegram ID |
 
 ---
 
-## Проверка MTProto прокси
-
-Бот анализирует ссылки `tg://proxy?...` и `https://t.me/proxy?...`:
-
-- Тип секрета: FakeTLS / DD / Simple
-- SNI — домен маскировки (для FakeTLS)
-- TCP + MTProto хэндшейк с EU-сервера
-- TCP + TLS хэндшейк с агентов (RU и др.)
-
-### Настройка агента
-
-#### Шаг 1 — Скопировать `proxy_agent.py` на удалённый сервер
-
-**Вариант A — Скачать из GitHub (самый простой):**
+## Docker Images
 
 ```bash
-ssh root@IP_СЕРВЕРА
-curl -o /opt/proxy_agent.py \
-  https://raw.githubusercontent.com/vsibilev007/telemt-bot/main/proxy_agent.py
+docker pull ghcr.io/vsibilev007/telemt-bot:latest
 ```
 
-**Вариант B — Скопировать по SCP с основного сервера:**
-
-```bash
-scp /opt/telemt-bot/proxy_agent.py root@IP_СЕРВЕРА:/opt/proxy_agent.py
-```
-
-**Вариант C — Клонировать весь репозиторий:**
-
-```bash
-ssh root@IP_СЕРВЕРА
-git clone https://github.com/vsibilev007/telemt-bot.git /opt/telemt-bot
-# Агент будет: /opt/telemt-bot/proxy_agent.py
-```
-
-#### Шаг 2 — Проверить что работает
-
-```bash
-python3 /opt/telemt-bot/proxy_agent.py --host 0.0.0.0 --port 8765 --token YOUR_TOKEN &
-
-# В другом терминале:
-curl "http://127.0.0.1:8765/health" -H "X-Token: YOUR_TOKEN"
-# Ответ: {"status": "ok"}
-```
-
-#### Шаг 3 — Создать systemd-сервис
-
-```bash
-cat > /etc/systemd/system/proxy-agent.service << 'EOF'
-[Unit]
-Description=Proxy Check Agent
-After=network.target
-
-[Service]
-Type=simple
-User=root
-ExecStart=/usr/bin/python3 /opt/telemt-bot/proxy_agent.py --host 0.0.0.0 --port 8765 --token YOUR_TOKEN
-Restart=on-failure
-RestartSec=5
-
-[Install]
-WantedBy=multi-user.target
-EOF
-
-systemctl daemon-reload
-systemctl enable --now proxy-agent
-```
-
-> Замени `0.0.0.0` на конкретный IP (например VPN-адрес `10.8.1.2`), если не нужно слушать все интерфейсы.
-
-#### Шаг 4 — Настроить бота
-
-Добавь в `.env` на основном сервере:
-
-```env
-AGENT_1_URL=http://IP_АГЕНТА:8765
-AGENT_1_NAME=RU
-AGENT_1_TOKEN=YOUR_TOKEN
-AGENT_1_FLAG=🇷🇺
-```
-
-Перезапусти бота:
-
-```bash
-systemctl restart telemt-bot
-```
-
-При проверке прокси бот покажет результат с обеих точек:
-
-```
-📡 Доступность:
-  🇪🇺 EU — TCP: 🟢 56 мс  |  MTProto: 🟢 3665 мс
-  🇷🇺 RU — TCP: 🟢 4 мс   |  TLS: 🟢 185 мс
-```
+| Tag | Description |
+|-----|-------------|
+| `latest` | Latest commit on `main` |
+| `v1.2.3` | Specific version |
+| `sha-abc1234` | Specific commit |
 
 ---
 
-## WEB Proxy (Telemt 3.5.5+)
-
-Бот поддерживает управление WEB-режимом прокси — технология, которая проксирует MTProto трафик через HTTPS/WebSocket, совместимый с типом прокси `WEB` в Telegram Desktop.
-
-### Возможности
-
-- **Статус** — lifecycle, runtime, limits, streams, sessions, learning, debug
-- **Сессии** — список активных WEB-сессий с пагинацией и деталями
-- **Управление** — закрытие сессий, очистка debug, сброс carrier learning
-- **Ссылки** — автоматическая генерация `tg://webproxy` ссылок для пользователей
-- **Авто-профили** — при создании/удалении пользователя WEB-профиль обновляется автоматически
-
-### Меню WEB Proxy
-
-| Кнопка | Описание |
-|--------|----------|
-| 📊 Статус | WEB runtime lifecycle, limits, streams, sessions |
-| 👥 Сессии | Список активных сессий с фильтрами |
-| 🧹 Очистить debug | Очистка debug-записей |
-| 🔄 Сброс learning | Сброс carrier learning evidence |
-
-### Ссылки
-
-Для серверов с Telemt 3.5.5+ бот генерирует WEB-ссылки:
-
-```
-WEB Proxy:
-🌐 list.lympik.ru
-tg://webproxy?server=list.lympik.ru&secret=dd...
-```
-
-Для серверов с Telemt 3.4.25 и ниже — только TLS-ссылки (старый формат).
-
-### API endpoints
-
-| Endpoint | Описание |
-|----------|----------|
-| `GET /v1/runtime/web/status` | WEB runtime lifecycle и статус |
-| `GET /v1/runtime/web/sessions` | Список активных сессий |
-| `GET /v1/runtime/web/sessions/{ref}` | Детали одной сессии |
-| `POST /v1/runtime/web/sessions/close` | Закрытие сессий |
-| `POST /v1/runtime/web/debug/clear` | Очистка debug |
-| `POST /v1/runtime/web/carrier-learning/reset` | Сброс carrier learning |
-
----
-
-## Структура проекта
+## Project Structure
 
 ```
 telemt-bot/
-├── bot.py              # Точка входа
-├── config.py           # Конфигурация из .env
-├── handlers.py         # Обработчики команд и callback
-├── keyboards.py        # Inline-клавиатуры
-├── formatters.py       # HTML-форматирование ответов
-├── charts.py           # Графики matplotlib
-├── api_client.py       # HTTP-клиент + кластерные операции
-├── database.py         # SQLite: трафик, алерты, сессии
-├── scheduler.py        # Фоновые задачи и алерты
-├── session.py          # Выбор сервера для пользователя
-├── proxy_checker.py    # Проверка MTProto прокси
-├── proxy_agent.py      # Агент проверки (только stdlib)
-├── logging_setup.py    # Цветной вывод, ротация файла
-├── tz.py               # Часовые пояса
-├── middlewares.py      # Авторизация
-├── states.py           # FSM состояния
-├── sysinfo.py          # Системная информация (psutil)
-├── qr_utils.py         # Генерация QR-кодов
-├── export_toml.py      # Бэкап telemt.toml
-├── export_utils.py     # Экспорт CSV/Excel
-├── requirements.txt
-├── pyproject.toml
-├── .env.example
-└── .gitignore
+├── bot.py              # Entry point
+├── config.py           # Configuration from .env
+├── handlers.py         # Command and callback handlers
+├── keyboards.py        # Inline keyboards
+├── formatters.py       # HTML response formatting
+├── api_client.py       # HTTP client + cluster operations
+├── database.py         # SQLite: traffic, alerts, sessions
+├── scheduler.py        # Background tasks and alerts
+├── proxy_checker.py    # MTProto proxy verification
+├── proxy_agent.py      # Remote check agent (stdlib only)
+├── docs/               # Detailed documentation
+└── docker-compose.yml  # Docker Compose configuration
 ```
 
 ---
 
-## Лицензия
+## License
 
-MIT
+[MIT](LICENSE)
