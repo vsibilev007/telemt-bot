@@ -1,4 +1,18 @@
-# Release: Docker-образ + CI/CD + Диагностика узла + Runtime Reload + 3.4.25
+# Release: Docker-образ + CI/CD + Диагностика узла + Runtime Reload + WEB Proxy
+
+## WEB Proxy (3.5.5+)
+
+- **Меню WEB Proxy** — кнопка в главном меню (только для Telemt 3.5.5+)
+- **Статус** — lifecycle, runtime, limits, streams, sessions, learning, debug
+- **Сессии** — список активных WEB-сессий с пагинацией и деталями (IP, carrier, user agent)
+- **Управление** — закрытие сессий, очистка debug-записей, сброс carrier learning
+- **WEB-ссылки** — автоматическая генерация `tg://webproxy?server=HOST&secret=ddSECRET`
+- **Авто-профили** — при создании пользователя WEB-профиль добавляется автоматически
+- **Авто-удаление** — при удалении пользователя WEB-профиль удаляется перед удалением access user
+- **Версионная проверка** — для Telemt 3.4.25 и ниже показываются только TLS-ссылки
+- **api_client.py** — методы get_web_status(), get_web_sessions(), get_web_session(), close_web_sessions(), clear_web_debug(), reset_web_carrier_learning()
+- **formatters.py** — format_web_status(), format_web_sessions(), format_web_session_detail(), make_webproxy_link()
+- **keyboards.py** — web_menu_kb(), web_sessions_kb(), web_session_detail_kb()
 
 ## Runtime Reload (3.4.25+)
 

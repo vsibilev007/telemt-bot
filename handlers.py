@@ -154,6 +154,24 @@ async def _api_call(target, func, *args, **kwargs):
         return None
 
 
+# Кэш версии Telemt для серверов (сбрасывается при смене сервера)
+_telemt_version_cache: dict[str, str] = {}
+
+
+async def _get_telemt_version(client) -> str:
+    """Получает версию Telemt с кэшированием."""
+    cache_key = client.base_url
+    if cache_key in _telemt_version_cache:
+        return _telemt_version_cache[cache_key]
+    try:
+        info = await client.get_system_info()
+        version = info.get("version", "")
+        _telemt_version_cache[cache_key] = version
+        return version
+    except Exception:
+        return ""
+
+
 def _get_all_links(user: dict) -> list[str]:
     ld = user.get("links", {})
     return ld.get("classic", []) + ld.get("secure", []) + ld.get("tls", [])
@@ -200,9 +218,11 @@ async def cmd_start(message: Message, config: Config):
         f"<i>Выберите действие в меню ниже 👇</i>",
         reply_markup=ReplyKeyboardRemove(),
     )
+    client, _ = await get_client(uid, config)
+    telemt_version = await _get_telemt_version(client)
     await message.answer(
         f"<b>Telemt Manager</b> — <code>{srv.group if config.is_cluster(srv) else srv.name}</code>",
-        reply_markup=main_menu_kb(config.servers, idx, conns, status, config),
+        reply_markup=main_menu_kb(config.servers, idx, conns, status, config, telemt_version),
     )
 
 
@@ -213,9 +233,11 @@ async def cmd_menu(message: Message, config: Config):
     idx = await get_server_index(uid, config)
     srv = config.servers[idx]
     status, conns = await _get_menu_state(uid, config)
+    client, _ = await get_client(uid, config)
+    telemt_version = await _get_telemt_version(client)
     await message.answer(
         f"<b>Telemt Manager</b> — <code>{srv.group if config.is_cluster(srv) else srv.name}</code>",
-        reply_markup=main_menu_kb(config.servers, idx, conns, status, config),
+        reply_markup=main_menu_kb(config.servers, idx, conns, status, config, telemt_version),
     )
 
 
@@ -226,8 +248,10 @@ async def cb_menu_main(cq: CallbackQuery, config: Config):
     idx = await get_server_index(uid, config)
     srv = config.servers[idx]
     status, conns = await _get_menu_state(uid, config)
+    client, _ = await get_client(uid, config)
+    telemt_version = await _get_telemt_version(client)
     text = f"<b>Telemt Manager</b> — <code>{srv.group if srv.group else srv.name}</code>"
-    kb = main_menu_kb(config.servers, idx, conns, status, config)
+    kb = main_menu_kb(config.servers, idx, conns, status, config, telemt_version)
 
     # Под фото/документом/стикером edit_text невозможен — удаляем и шлём заново
     if cq.message.text:
@@ -266,10 +290,12 @@ async def cb_server_select(cq: CallbackQuery, config: Config):
     srv = config.servers[idx]
     await cq.answer(f"✅ {srv.name}", show_alert=False)
     status, conns = await _get_menu_state(_uid(cq), config)
+    client, _ = await get_client(_uid(cq), config)
+    telemt_version = await _get_telemt_version(client)
     await _safe_edit(
         cq,
         f"<b>Telemt Manager</b> — <code>{srv.group if config.is_cluster(srv) else srv.name}</code>",
-        reply_markup=main_menu_kb(config.servers, idx, conns, status, config),
+        reply_markup=main_menu_kb(config.servers, idx, conns, status, config, telemt_version),
     )
 
 
@@ -1951,12 +1977,13 @@ async def cb_config_edit_menu(cq: CallbackQuery, config: Config):
     if revision:
         header += f"<i>revision: {revision[:12]}…</i>"
     header += "\n\nВыберите секцию:"
-
-    await _safe_edit(cq, header, reply_markup=config_edit_sections_kb())
+    client, _ = await get_client(_uid(cq), config)
+    telemt_version = await _get_telemt_version(client)
+    await _safe_edit(cq, header, reply_markup=config_edit_sections_kb(telemt_version))
 
 
 @router.callback_query(F.data == "configedit:menu")
-async def cb_config_edit_back(cq: CallbackQuery):
+async def cb_config_edit_back(cq: CallbackQuery, config: Config):
     """Вернуться к списку секций."""
     uid = _uid(cq)
     data = _config_edit_cache.get(uid, {})
@@ -1965,7 +1992,9 @@ async def cb_config_edit_back(cq: CallbackQuery):
     if revision:
         header += f"<i>revision: {revision[:12]}…</i>"
     header += "\n\nВыберите секцию:"
-    await _safe_edit(cq, header, reply_markup=config_edit_sections_kb())
+    client, _ = await get_client(uid, config)
+    telemt_version = await _get_telemt_version(client)
+    await _safe_edit(cq, header, reply_markup=config_edit_sections_kb(telemt_version))
 
 
 @router.callback_query(F.data.startswith("configedit:section:"))
@@ -2066,7 +2095,9 @@ async def fsm_config_edit_skip(message: Message, state: FSMContext):
     if revision:
         header += f"<i>revision: {revision[:12]}…</i>"
     header += "\n\nВыберите секцию:"
-    await message.answer(header, reply_markup=config_edit_sections_kb())
+    client, _ = await get_client(uid, config)
+    telemt_version = await _get_telemt_version(client)
+    await message.answer(header, reply_markup=config_edit_sections_kb(telemt_version))
 
 
 @router.message(ConfigEditFSM.waiting_value, F.text.regexp(r"^[^/]"))

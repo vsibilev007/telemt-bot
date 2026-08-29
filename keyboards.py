@@ -17,15 +17,27 @@ def _fmt_bytes_short(b: int) -> str:
 
 # ─── Главное меню ─────────────────────────────────────────────────────────────
 
+WEB_PROXY_MIN_VERSION = (3, 5, 5)
+
+
+def _version_tuple(v: str) -> tuple[int, ...]:
+    try:
+        return tuple(int(x) for x in v.split("."))
+    except (ValueError, AttributeError):
+        return (0, 0, 0)
+
+
 def main_menu_kb(
     servers: list,
     current: int = 0,
     online_count: int = 0,
     status: str = "unknown",
     config=None,
+    telemt_version: str = "",
 ) -> InlineKeyboardMarkup:
     kb = InlineKeyboardBuilder()
     lite = config.lite_mode if config else False
+    has_web = _version_tuple(telemt_version) >= WEB_PROXY_MIN_VERSION
 
     if status == "ok":
         status_btn = "🟢 Состояние сервера"
@@ -52,10 +64,12 @@ def main_menu_kb(
         kb.button(text="🔗 Upstreams",          callback_data="menu:upstreams")
         kb.button(text="📡 DC / Writers",       callback_data="menu:dcs")
         kb.button(text="📤 Бэкап",              callback_data="users:export_toml")
-        kb.button(text="🌐 WEB Proxy",          callback_data="menu:web")
+        if has_web:
+            kb.button(text="🌐 WEB Proxy",      callback_data="menu:web")
         kb.button(text="🔍 Проверить прокси",   callback_data="menu:proxy_check")
         kb.button(text="⚙️ Конфиг",            callback_data="menu:config_edit")
-        schema_base = [2, 2, 2, 2, 2, 2, 1]
+        # Схема зависит от количества кнопок (с WEB или без)
+        schema_base = [2, 2, 2, 2, 2, 2, 1] if has_web else [2, 2, 2, 2, 2, 2]
 
     # Переключатель серверов
     menu_servers = config.get_menu_servers() if config else servers
@@ -394,14 +408,18 @@ CONFIG_SECTIONS = [
     ("upstreams", "🔗 Upstreams"),
     ("show_link", "📋 Show Link"),
     ("dc_overrides", "📡 DC Overrides"),
-    ("web", "🌐 WEB Proxy"),
 ]
 
+CONFIG_SECTIONS_WEB = ("web", "🌐 WEB Proxy")
 
-def config_edit_sections_kb() -> InlineKeyboardMarkup:
+
+def config_edit_sections_kb(telemt_version: str = "") -> InlineKeyboardMarkup:
     kb = InlineKeyboardBuilder()
     for key, label in CONFIG_SECTIONS:
         kb.button(text=label, callback_data=f"configedit:section:{key}")
+    # WEB секция только для Telemt 3.5.5+
+    if _version_tuple(telemt_version) >= WEB_PROXY_MIN_VERSION:
+        kb.button(text=CONFIG_SECTIONS_WEB[1], callback_data=f"configedit:section:{CONFIG_SECTIONS_WEB[0]}")
     kb.button(text="◀️ Меню", callback_data="menu:main")
     kb.adjust(2)
     return kb.as_markup()
