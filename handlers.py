@@ -2085,7 +2085,7 @@ async def cb_config_edit_field(cq: CallbackQuery, state: FSMContext):
 
 
 @router.message(ConfigEditFSM.waiting_value, Command("skip"))
-async def fsm_config_edit_skip(message: Message, state: FSMContext):
+async def fsm_config_edit_skip(message: Message, state: FSMContext, config: Config):
     """/skip — отмена и возврат в меню конфигурации."""
     await state.clear()
     uid = message.from_user.id
