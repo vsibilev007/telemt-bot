@@ -33,8 +33,8 @@ For servers with Telemt 3.5.5+, the bot generates WEB links:
 
 ```
 WEB Proxy:
-🌐 list.lympik.ru
-tg://webproxy?server=list.lympik.ru&secret=dd...
+🌐 proxy.example.com
+tg://webproxy?server=proxy.example.com&secret=dd...
 ```
 
 For servers with Telemt 3.4.25 and below — only TLS links (legacy format).

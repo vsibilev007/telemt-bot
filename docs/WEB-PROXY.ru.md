@@ -33,8 +33,8 @@ WEB Proxy режим проксирует MTProto трафик через HTTPS/
 
 ```
 WEB Proxy:
-🌐 list.lympik.ru
-tg://webproxy?server=list.lympik.ru&secret=dd...
+🌐 proxy.example.com
+tg://webproxy?server=proxy.example.com&secret=dd...
 ```
 
 Для серверов с Telemt 3.4.25 и ниже — только TLS-ссылки (старый формат).
