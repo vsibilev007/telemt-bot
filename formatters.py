@@ -439,7 +439,7 @@ def format_user_links(u: dict, web_config: dict = None, telemt_version: str = ""
 
     # TLS-ссылки показываем всегда (WEB Proxy доступен не на всех платформах)
     if tls_links:
-        parts.append("\n<b>TLS:</b>")
+        parts.append("\n<b>MTProxy:</b>")
         for link in tls_links:
             sni = _extract_sni_from_link(link)
             if sni:
