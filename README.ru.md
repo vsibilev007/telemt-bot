@@ -102,6 +102,17 @@ telemt-bot/
 
 ---
 
+## Поддержка
+
+Если проект оказался полезным, вы можете поддержать его развитие:
+
+**USDT (TON):**
+```
+UQDly-HkY2hukMN8d1O6epG5PliTbxmlKyjt_7Mrn-gN93Fv
+```
+
+---
+
 ## Лицензия
 
 [MIT](LICENSE)
