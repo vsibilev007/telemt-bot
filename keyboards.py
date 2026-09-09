@@ -465,14 +465,29 @@ def export_toml_kb() -> InlineKeyboardMarkup:
 
 # ─── WEB Proxy ────────────────────────────────────────────────────────────────
 
-def web_menu_kb() -> InlineKeyboardMarkup:
+def web_menu_kb(op_state: str = "running") -> InlineKeyboardMarkup:
     kb = InlineKeyboardBuilder()
     kb.button(text="📊 Статус",           callback_data="web:status")
     kb.button(text="👥 Сессии",           callback_data="web:sessions")
+    # Lifecycle buttons depend on current state
+    if op_state == "running":
+        kb.button(text="⏸ Пауза",        callback_data="web:pause")
+        kb.button(text="🔄 Drain",        callback_data="web:drain")
+    elif op_state == "paused":
+        kb.button(text="▶️ Resume",       callback_data="web:resume")
+    elif op_state in ("draining", "force_closing"):
+        kb.button(text="▶️ Resume",       callback_data="web:resume")
     kb.button(text="🧹 Очистить debug",   callback_data="web:debug_clear")
     kb.button(text="🔄 Сброс learning",   callback_data="web:carrier_reset")
     kb.button(text="◀️ Меню",             callback_data="menu:main")
-    kb.adjust(2, 2, 1)
+    n = 2 + (2 if op_state == "running" else (1 if op_state in ("paused", "draining", "force_closing") else 0)) + 2 + 1
+    schema = []
+    remaining = n
+    while remaining > 0:
+        row = min(2, remaining)
+        schema.append(row)
+        remaining -= row
+    kb.adjust(*schema)
     return kb.as_markup()
 
 

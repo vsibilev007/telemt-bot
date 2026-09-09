@@ -911,6 +911,31 @@ def format_web_status(d: dict) -> str:
     if listeners:
         lines.append(f"Listeners: <code>{', '.join(listeners)}</code>")
 
+    # Ingress status
+    ingress = d.get("ingress", {})
+    if ingress:
+        accepting = ingress.get("accepting_connections", False)
+        live = ingress.get("live_acceptors", 0)
+        tcp_total = ingress.get("tcp_accept_total", 0)
+        tcp_err = ingress.get("tcp_accept_error_total", 0)
+        lines.append(f"Ingress: {'✅' if accepting else '❌'} | "
+                     f"Acceptors: {live} | TCP: {tcp_total} (err: {tcp_err})")
+
+    # Operator lifecycle (pause/drain)
+    op_lifecycle = d.get("operator_lifecycle", {})
+    if op_lifecycle:
+        op_state = op_lifecycle.get("state", "?")
+        op_icon = {"running": "🟢", "paused": "🟡", "draining": "🟠",
+                   "force_closing": "🔴", "drained": "🔴"}.get(op_state, "❓")
+        admission = op_lifecycle.get("admission_open", True)
+        lines.append(f"Operator: {op_icon} <b>{op_state}</b> | "
+                     f"Admission: {'✅' if admission else '❌'}")
+        drain = op_lifecycle.get("drain", {})
+        if drain:
+            drain_phase = drain.get("phase", "?")
+            drain_timeout = drain.get("timeout_secs", 0)
+            lines.append(f"  Drain: {drain_phase} (timeout: {drain_timeout}с)")
+
     rt = d.get("runtime")
     if rt:
         gen = rt.get("generation_id", "?")

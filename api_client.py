@@ -229,6 +229,22 @@ class TelemetClient:
         return await self._request("POST", "/runtime/web/carrier-learning/reset",
                                    json={"runtime_instance": runtime_instance})
 
+    async def web_lifecycle_pause(self, runtime_instance: str) -> dict:
+        """POST /v1/runtime/web/lifecycle/pause — пауза WEB admission"""
+        return await self._request("POST", "/runtime/web/lifecycle/pause",
+                                   json={"runtime_instance": runtime_instance})
+
+    async def web_lifecycle_drain(self, runtime_instance: str, timeout_secs: int = 30) -> dict:
+        """POST /v1/runtime/web/lifecycle/drain — graceful drain с таймаутом"""
+        return await self._request("POST", "/runtime/web/lifecycle/drain",
+                                   json={"runtime_instance": runtime_instance,
+                                         "timeout_secs": timeout_secs})
+
+    async def web_lifecycle_resume(self, runtime_instance: str) -> dict:
+        """POST /v1/runtime/web/lifecycle/resume — отмена drain, открытие admission"""
+        return await self._request("POST", "/runtime/web/lifecycle/resume",
+                                   json={"runtime_instance": runtime_instance})
+
     async def ping(self) -> bool:
         try:
             await self.get_health()

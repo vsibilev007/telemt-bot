@@ -2349,7 +2349,9 @@ async def cb_web_menu(cq: CallbackQuery, config: Config):
         return
 
     from formatters import format_web_status
-    await _safe_edit(cq, format_web_status(data), reply_markup=web_menu_kb())
+    op_lifecycle = data.get("operator_lifecycle", {})
+    op_state = op_lifecycle.get("state", "running")
+    await _safe_edit(cq, format_web_status(data), reply_markup=web_menu_kb(op_state))
 
 
 @router.callback_query(F.data == "web:status")
@@ -2535,6 +2537,81 @@ async def cb_web_carrier_reset(cq: CallbackQuery, config: Config):
         return
 
     # Обновляем статус
+    await cb_web_menu(cq, config)
+
+
+@router.callback_query(F.data == "web:pause")
+async def cb_web_pause(cq: CallbackQuery, config: Config):
+    """Пауза WEB admission."""
+    client, srv = await get_client(_uid(cq), config)
+    try:
+        status = await client.get_web_status()
+        rt = status.get("runtime", {})
+        runtime_instance = rt.get("runtime_instance", "")
+    except Exception:
+        runtime_instance = ""
+
+    if not runtime_instance:
+        await cq.answer("❌ WEB runtime недоступен", show_alert=True)
+        return
+
+    try:
+        await client.web_lifecycle_pause(runtime_instance)
+        await cq.answer("⏸ Пауза — admission закрыт", show_alert=True)
+    except ApiError as e:
+        await cq.answer(f"❌ {e.message}", show_alert=True)
+        return
+
+    await cb_web_menu(cq, config)
+
+
+@router.callback_query(F.data == "web:drain")
+async def cb_web_drain(cq: CallbackQuery, config: Config):
+    """Graceful drain WEB сессий."""
+    client, srv = await get_client(_uid(cq), config)
+    try:
+        status = await client.get_web_status()
+        rt = status.get("runtime", {})
+        runtime_instance = rt.get("runtime_instance", "")
+    except Exception:
+        runtime_instance = ""
+
+    if not runtime_instance:
+        await cq.answer("❌ WEB runtime недоступен", show_alert=True)
+        return
+
+    try:
+        await client.web_lifecycle_drain(runtime_instance, timeout_secs=30)
+        await cq.answer("🔄 Drain запущен (30с)", show_alert=True)
+    except ApiError as e:
+        await cq.answer(f"❌ {e.message}", show_alert=True)
+        return
+
+    await cb_web_menu(cq, config)
+
+
+@router.callback_query(F.data == "web:resume")
+async def cb_web_resume(cq: CallbackQuery, config: Config):
+    """Отмена drain, открытие admission."""
+    client, srv = await get_client(_uid(cq), config)
+    try:
+        status = await client.get_web_status()
+        rt = status.get("runtime", {})
+        runtime_instance = rt.get("runtime_instance", "")
+    except Exception:
+        runtime_instance = ""
+
+    if not runtime_instance:
+        await cq.answer("❌ WEB runtime недоступен", show_alert=True)
+        return
+
+    try:
+        await client.web_lifecycle_resume(runtime_instance)
+        await cq.answer("▶️ Resume — admission открыт", show_alert=True)
+    except ApiError as e:
+        await cq.answer(f"❌ {e.message}", show_alert=True)
+        return
+
     await cb_web_menu(cq, config)
 
 
