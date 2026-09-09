@@ -3,14 +3,15 @@
 ## WEB Proxy Support (Telemt 3.5.5+)
 
 - **WEB Proxy menu** — new button in main menu (visible only for Telemt 3.5.5+)
-- **Status** — lifecycle, runtime, limits, streams, sessions, learning, debug
+- **Status** — lifecycle, runtime, limits, streams, sessions, learning, debug, ingress, operator lifecycle, capacity, carrier negotiation
 - **Sessions** — list active WEB sessions with pagination and details (IP, carrier, user agent)
 - **Management** — close sessions, clear debug records, reset carrier learning
+- **Lifecycle control** (Telemt 3.5.7+) — pause admission, graceful drain with timeout, resume
 - **WEB links** — auto-generate `tg://webproxy?server=HOST&secret=ddSECRET` for users
 - **Auto-profiles** — WEB profile automatically added when creating users
 - **Auto-removal** — WEB profile removed before deleting access user
 - **Version check** — for Telemt 3.4.25 and below, only TLS links are shown
-- **api_client.py** — new methods: get_web_status(), get_web_sessions(), get_web_session(), close_web_sessions(), clear_web_debug(), reset_web_carrier_learning()
+- **api_client.py** — new methods: get_web_status(), get_web_sessions(), get_web_session(), close_web_sessions(), clear_web_debug(), reset_web_carrier_learning(), web_lifecycle_pause(), web_lifecycle_drain(), web_lifecycle_resume()
 - **formatters.py** — new formatters: format_web_status(), format_web_sessions(), format_web_session_detail(), make_webproxy_link()
 - **keyboards.py** — new keyboards: web_menu_kb(), web_sessions_kb(), web_session_detail_kb()
 

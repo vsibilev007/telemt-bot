@@ -2771,7 +2771,7 @@ async def cmd_help(message: Message):
         "🔗 <b>Upstreams</b> — RTT и статус апстримов\n"
         "📡 <b>DC / Writers</b> — статус датацентров и ME Writers\n"
         "📤 <b>Бэкап</b> — выгрузка <code>telemt.toml</code> файлом в чат\n"
-        "🌐 <b>WEB Proxy</b> — статус, сессии, debug, carrier learning\n"
+        "🌐 <b>WEB Proxy</b> — статус, сессии, lifecycle (pause/drain/resume), debug\n"
         "🔍 <b>Проверить прокси</b> — диагностика узла: DNS, TCP, SSH, Ping, MTProto\n"
         "⚙️ <b>Конфиг</b> — редактирование настроек сервера (General, Timeouts, Censorship…)\n"
         "\n"
