@@ -33,6 +33,11 @@ ENV PATH=/opt/venv/bin:$PATH \
     MPLCONFIGDIR=/tmp/mpl \
     TELEMT_BOT_DB_PATH=/data/telemt_bot.db
 
+# Security updates from Debian (libpcre2 and similar).
+RUN apt-get update \
+    && apt-get upgrade -y \
+    && rm -rf /var/lib/apt/lists/*
+
 # Non-root пользователь.
 RUN useradd --uid 10001 --create-home --shell /usr/sbin/nologin appuser \
     && mkdir -p /data /tmp/mpl \
@@ -45,7 +50,14 @@ COPY --from=builder /opt/venv /opt/venv
 
 # Обновляем системный setuptools (приходит из base image) до версии с пофикшенными
 # вендорными wheel и jaraco.context — иначе Trivy находит HIGH CVE в /usr/local.
-RUN /usr/local/bin/pip install --upgrade setuptools
+# pip в рантайме не нужен, а его vendored urllib3 помечается как HIGH.
+RUN /usr/local/bin/pip install --upgrade setuptools \
+    && rm -rf /usr/local/lib/python3.11/site-packages/pip \
+              /usr/local/lib/python3.11/site-packages/pip-*.dist-info \
+              /usr/local/bin/pip /usr/local/bin/pip3 /usr/local/bin/pip3.11 \
+              /opt/venv/lib/python3.11/site-packages/pip \
+              /opt/venv/lib/python3.11/site-packages/pip-*.dist-info \
+              /opt/venv/bin/pip /opt/venv/bin/pip3 /opt/venv/bin/pip3.11
 
 # Только исходники (см. .dockerignore — доки/тесты/секреты не попадают).
 COPY --chown=appuser:appuser *.py ./
