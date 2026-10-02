@@ -240,9 +240,18 @@ def users_extra_kb() -> InlineKeyboardMarkup:
     kb = InlineKeyboardBuilder()
     kb.button(text="⏰ Истекающие",        callback_data="users:expiring")
     kb.button(text="📊 Квоты",             callback_data="users:quota")
+    kb.button(text="🌐 Активные IP",       callback_data="users:active_ips")
     kb.button(text="🧹 Удалить истёкших",  callback_data="users:delete_expired_confirm")
     kb.button(text="◀️ К списку",          callback_data="menu:users")
-    kb.adjust(2, 1, 1)
+    kb.adjust(2, 2, 1)
+    return kb.as_markup()
+
+
+def users_active_ips_kb() -> InlineKeyboardMarkup:
+    kb = InlineKeyboardBuilder()
+    kb.button(text="🔄 Обновить", callback_data="users:active_ips")
+    kb.button(text="◀️ Ещё", callback_data="users:extra")
+    kb.adjust(2)
     return kb.as_markup()
 
 
@@ -330,13 +339,19 @@ def runtime_kb() -> InlineKeyboardMarkup:
     kb = InlineKeyboardBuilder()
     kb.button(text="🎯 Gates",            callback_data="runtime:gates")
     kb.button(text="🚀 Init",             callback_data="runtime:init")
+    kb.button(text="✅ Ready",            callback_data="runtime:ready")
     kb.button(text="📈 ME Quality",       callback_data="runtime:me_quality")
+    kb.button(text="🏊 ME Pool",          callback_data="runtime:me_pool")
+    kb.button(text="🧪 ME Selftest",      callback_data="runtime:me_selftest")
+    kb.button(text="🌐 NAT/STUN",         callback_data="runtime:nat_stun")
     kb.button(text="🔗 Upstream Quality", callback_data="runtime:upstream_quality")
+    kb.button(text="0️⃣ Zero",             callback_data="runtime:zero")
+    kb.button(text="📦 Minimal",          callback_data="runtime:minimal")
     kb.button(text="📋 Events",           callback_data="runtime:events")
     kb.button(text="👥 Connections",      callback_data="runtime:connections")
     kb.button(text="🔍 TLS Fingerprints", callback_data="runtime:tls_fingerprints")
     kb.button(text="◀️ Меню",             callback_data="menu:main")
-    kb.adjust(2, 2, 2, 1, 1)
+    kb.adjust(2, 2, 2, 2, 2, 2, 1, 1)
     return kb.as_markup()
 
 
