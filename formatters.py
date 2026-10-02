@@ -5,6 +5,7 @@
 from __future__ import annotations
 
 import base64
+import html
 import math
 import urllib.parse
 from typing import Optional
@@ -60,9 +61,47 @@ def _extract_secret_from_link(link: str) -> str:
     return ""
 
 
-def make_webproxy_link(hostname: str, secret_hex: str, mode: str = "dd") -> str:
-    """Генерирует tg://webproxy ссылку для WEB-режима."""
-    return f"tg://webproxy?server={hostname}&secret={mode}{secret_hex}"
+def make_webproxy_link(
+    hostname: str,
+    secret_hex: str,
+    mode: str = "dd",
+    base_path: str = "",
+) -> str:
+    """tg://webproxy в формате Telemt 3.5.8+.
+
+    Пустой base_path оставляет секрет hex с префиксом dd/plain.
+    Непустой путь кодирует секрет как в Telegram Desktop: маркер 0x70,
+    для dd ещё 0xDD, затем 16 байт, в base64url без padding.
+    """
+    base_path = base_path.strip().strip("/")
+    if not base_path:
+        prefix = "" if mode == "plain" else "dd"
+        return f"tg://webproxy?server={hostname}&secret={prefix}{secret_hex}"
+    raw = bytes.fromhex(secret_hex)
+    marked = bytearray((0x70,))
+    if mode != "plain":
+        marked.append(0xDD)
+    marked.extend(raw)
+    secret = base64.urlsafe_b64encode(marked).decode().rstrip("=")
+    server = urllib.parse.quote(f"{hostname}/{base_path}", safe="")
+    return f"tg://webproxy?server={server}&secret={secret}"
+
+
+def proxy_connect_url(link: str) -> str:
+    """Ссылка, которую Telegram открывает как подключение прокси, а не копирует."""
+    parsed = urllib.parse.urlparse(link.strip())
+    if parsed.scheme == "tg" and parsed.netloc in {"proxy", "webproxy"} and parsed.query:
+        return f"https://t.me/{parsed.netloc}?{parsed.query}"
+    if parsed.scheme in {"http", "https"} and parsed.netloc in {"t.me", "telegram.me"}:
+        path = parsed.path.lstrip("/")
+        if path in {"proxy", "webproxy"} and parsed.query:
+            return f"https://t.me/{path}?{parsed.query}"
+    return link.strip()
+
+
+def format_proxy_link(link: str, label: str = "Подключить") -> str:
+    href = html.escape(proxy_connect_url(link), quote=True)
+    return f'<a href="{href}">{html.escape(label)}</a>'
 
 
 def _epoch_to_str(epoch: int) -> str:
@@ -408,6 +447,7 @@ def format_user_links(u: dict, web_config: dict = None, telemt_version: str = ""
         vhosts = web_config.get("vhosts", [])
         for vh in vhosts:
             hostname = vh.get("host", "")
+            base_path = vh.get("base_path") or ""
             profiles = vh.get("profiles", [])
             for prof in profiles:
                 if prof.get("user") == username:
@@ -416,7 +456,7 @@ def format_user_links(u: dict, web_config: dict = None, telemt_version: str = ""
                     for link in tls_links:
                         secret = _extract_secret_from_link(link)
                         if secret:
-                            web_link = make_webproxy_link(hostname, secret, mode)
+                            web_link = make_webproxy_link(hostname, secret, mode, base_path)
                             web_links.append((hostname, web_link))
                             break  # Один секрет на профиль
                     break  # Один профиль на vhost
@@ -424,18 +464,17 @@ def format_user_links(u: dict, web_config: dict = None, telemt_version: str = ""
     if web_links:
         parts.append("\n<b>WEB Proxy:</b>")
         for hostname, link in web_links:
-            parts.append(f"🌐 <b>{hostname}</b>")
-            parts.append(f"<code>{link}</code>")
+            parts.append(f"🌐 <b>{html.escape(hostname)}</b> — {format_proxy_link(link)}")
 
     if classic:
         parts.append("\n<b>Classic:</b>")
         for link in classic:
-            parts.append(f"<code>{link}</code>")
+            parts.append(format_proxy_link(link))
 
     if secure:
         parts.append("\n<b>Secure (DD):</b>")
         for link in secure:
-            parts.append(f"<code>{link}</code>")
+            parts.append(format_proxy_link(link))
 
     # TLS-ссылки показываем всегда (WEB Proxy доступен не на всех платформах)
     if tls_links:
@@ -443,10 +482,11 @@ def format_user_links(u: dict, web_config: dict = None, telemt_version: str = ""
         for link in tls_links:
             sni = _extract_sni_from_link(link)
             if sni:
-                parts.append(f"🌐 <b>{sni}</b>")
-            parts.append(f"<code>{link}</code>")
+                parts.append(f"🌐 <b>{html.escape(sni)}</b> — {format_proxy_link(link)}")
+            else:
+                parts.append(format_proxy_link(link))
 
-    parts.append("\n<i>Нажмите на ссылку, чтобы скопировать</i>")
+    parts.append("\n<i>Нажмите «Подключить», чтобы добавить прокси</i>")
     return "\n".join(parts), all_links + [wl[1] for wl in web_links]
 
 
@@ -505,6 +545,154 @@ def format_runtime_init(d: dict) -> str:
             dur_str = f" {dur}мс" if dur else ""
             lines.append(f"  {c_icon} {c.get('title', c.get('id', '?'))}{dur_str}")
 
+    return "\n".join(lines)
+
+
+def _snapshot_unavailable(title: str, d: dict) -> Optional[str]:
+    if d.get("enabled") is False or not d.get("data"):
+        return f"<b>{title}</b>\n\n❌ {d.get('reason') or 'unavailable'}"
+    return None
+
+
+def format_health_ready(d: dict) -> str:
+    ready = bool(d.get("ready"))
+    icon = "✅" if ready else "🔴"
+    lines = [
+        "<b>✅ Readiness</b>",
+        "",
+        f"  {icon} <b>{d.get('status', '?')}</b>",
+        f"  Admission: {fmt_bool(d.get('admission_open', False))}",
+        f"  Upstreams: {d.get('healthy_upstreams', 0)}/{d.get('total_upstreams', 0)}",
+    ]
+    if d.get("reason"):
+        lines.append(f"  Причина: {d['reason']}")
+    return "\n".join(lines)
+
+
+def format_me_pool(d: dict) -> str:
+    missing = _snapshot_unavailable("🏊 ME Pool", d)
+    if missing:
+        return missing
+    data = d["data"]
+    gen = data.get("generations") or {}
+    writers = data.get("writers") or {}
+    health = writers.get("health") or {}
+    hard = data.get("hardswap") or {}
+    refill = data.get("refill") or {}
+    lines = [
+        "<b>🏊 ME Pool</b>",
+        "",
+        f"  Active gen: {gen.get('active_generation', 0)}  Warm: {gen.get('warm_generation', 0)}",
+        f"  Writers: {writers.get('total', 0)}  alive: {writers.get('alive_non_draining', 0)}",
+        f"  Health: 🟢 {health.get('healthy', 0)}  🟡 {health.get('degraded', 0)}  draining {health.get('draining', 0)}",
+        f"  Hardswap: {fmt_bool(hard.get('enabled', False))}  pending: {fmt_bool(hard.get('pending', False))}",
+        f"  Refill in flight: {refill.get('inflight_endpoints_total', 0)}",
+    ]
+    return "\n".join(lines)
+
+
+def format_nat_stun(d: dict) -> str:
+    missing = _snapshot_unavailable("🌐 NAT/STUN", d)
+    if missing:
+        return missing
+    data = d["data"]
+    flags = data.get("flags") or {}
+    servers = data.get("servers") or {}
+    reflection = data.get("reflection") or {}
+    lines = [
+        "<b>🌐 NAT/STUN</b>",
+        "",
+        f"  Probe: {fmt_bool(flags.get('nat_probe_enabled', False))}",
+        f"  Runtime off: {fmt_bool(flags.get('nat_probe_disabled_runtime', False))}",
+        f"  Live servers: {servers.get('live_total', 0)}",
+    ]
+    for family in ("v4", "v6"):
+        block = reflection.get(family)
+        if block:
+            lines.append(f"  {family}: {block.get('addr', '—')}  age {block.get('age_secs', 0)}с")
+    backoff = data.get("stun_backoff_remaining_ms")
+    if backoff:
+        lines.append(f"  Backoff: {backoff} мс")
+    return "\n".join(lines)
+
+
+def format_me_selftest(d: dict) -> str:
+    missing = _snapshot_unavailable("🧪 ME Selftest", d)
+    if missing:
+        return missing
+    data = d["data"]
+    kdf = data.get("kdf") or {}
+    skew = data.get("timeskew") or {}
+    ip = data.get("ip") or {}
+    bnd = data.get("bnd") or {}
+    lines = [
+        "<b>🧪 ME Selftest</b>",
+        "",
+        f"  KDF: {kdf.get('state', '?')}  {kdf.get('ewma_errors_per_min', 0):.2f}/мин",
+        f"  Timeskew: {skew.get('state', '?')}  max15m {skew.get('max_skew_secs_15m', '—')}",
+    ]
+    for family in ("v4", "v6"):
+        block = ip.get(family)
+        if block:
+            lines.append(f"  {family}: {block.get('addr', '—')} ({block.get('state', '?')})")
+    lines.append(f"  BND addr: {bnd.get('addr_state', '?')}  port: {bnd.get('port_state', '?')}")
+    return "\n".join(lines)
+
+
+def format_zero_all(d: dict) -> str:
+    core = d.get("core") or {}
+    upstream = d.get("upstream") or {}
+    me = d.get("middle_proxy") or {}
+    pool = d.get("pool") or {}
+    desync = d.get("desync") or {}
+    return "\n".join([
+        "<b>0️⃣ Zero counters</b>",
+        "",
+        f"  Uptime: {fmt_uptime(core.get('uptime_seconds', 0))}",
+        f"  Conn: {core.get('connections_total', 0):,}  bad: {core.get('connections_bad_total', 0):,}",
+        f"  Handshake timeouts: {core.get('handshake_timeouts_total', 0):,}",
+        f"  Upstream: {upstream.get('connect_success_total', 0):,} ok / {upstream.get('connect_fail_total', 0):,} fail",
+        f"  ME reconnect: {me.get('reconnect_success_total', 0):,}/{me.get('reconnect_attempt_total', 0):,}",
+        f"  Pool swaps: {pool.get('pool_swap_total', 0):,}  desync: {desync.get('desync_total', 0):,}",
+    ])
+
+
+def format_minimal_all(d: dict) -> str:
+    missing = _snapshot_unavailable("📦 Minimal", d)
+    if missing:
+        return missing
+    data = d["data"]
+    runtime = data.get("me_runtime") or {}
+    paths = data.get("network_path") or []
+    lines = [
+        "<b>📦 Minimal</b>",
+        "",
+        f"  Gen active/warm: {runtime.get('active_generation', 0)}/{runtime.get('warm_generation', 0)}",
+        f"  Writers active/warm: {runtime.get('adaptive_floor_active_writers_current', 0)}/{runtime.get('adaptive_floor_warm_writers_current', 0)}",
+        f"  Floor: {runtime.get('floor_mode', '?')}  pick: {runtime.get('me_writer_pick_mode', '?')}",
+        f"  Quarantine: {runtime.get('quarantined_endpoints_total', 0)}",
+    ]
+    if paths:
+        lines.append("")
+        lines.append("<b>Paths:</b>")
+        for row in paths[:8]:
+            addr = row.get("selected_addr_v4") or row.get("selected_addr_v6") or "—"
+            pref = row.get("ip_preference") or ""
+            lines.append(f"  DC{row.get('dc', '?')}: {addr} {pref}".rstrip())
+    return "\n".join(lines)
+
+
+def format_active_ips(rows: list) -> str:
+    lines = ["<b>🌐 Активные IP</b>", ""]
+    if not rows:
+        lines.append("— нет активных адресов —")
+        return "\n".join(lines)
+    for row in rows[:30]:
+        name = html.escape(str(row.get("username", "?")))
+        ips = ", ".join(html.escape(str(ip)) for ip in (row.get("active_ips") or []))
+        lines.append(f"  <b>{name}</b>  {ips or '—'}")
+    if len(rows) > 30:
+        lines.append(f"\n… ещё {len(rows) - 30}")
     return "\n".join(lines)
 
 

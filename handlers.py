@@ -15,7 +15,12 @@ from aiogram import F, Router
 from aiogram.exceptions import TelegramBadRequest
 from aiogram.filters import CommandStart, Command
 from aiogram.fsm.context import FSMContext
-from aiogram.types import BufferedInputFile, CallbackQuery, InlineKeyboardMarkup, InputMediaPhoto, Message, ReplyKeyboardRemove
+from aiogram.types import (
+    BufferedInputFile, CallbackQuery, InlineKeyboardMarkup, InputMediaPhoto,
+    LinkPreviewOptions, Message, ReplyKeyboardRemove,
+)
+
+_NO_LINK_PREVIEW = LinkPreviewOptions(is_disabled=True)
 
 
 from api_client import ApiError, TelemetClient, cluster_write, cluster_read, cluster_users_with_nodes, NodeResult
@@ -24,10 +29,13 @@ import database as db
 from export_utils import users_to_csv, users_to_xlsx
 from formatters import (
     format_connections, format_dashboard, format_dcs,
-    format_limits, format_me_quality, format_me_writers, format_runtime_events,
+    format_limits, format_me_quality, format_me_pool, format_me_selftest, format_me_writers,
+    format_minimal_all, format_nat_stun, format_health_ready, format_runtime_events,
     format_runtime_gates, format_runtime_init, format_security_posture,
+    format_active_ips, format_zero_all,
     format_security_whitelist, format_tls_fingerprints, format_upstream_quality,
-    format_upstreams, format_user_detail, format_user_links,
+    format_upstreams, format_user_detail, format_user_links, format_proxy_link,
+    proxy_connect_url,
     format_users_quota, fmt_bytes,
 )
 from keyboards import (
@@ -36,7 +44,7 @@ from keyboards import (
     sysinfo_kb, traffic_period_kb, traffic_report_kb, upstreams_kb,
     proxy_check_kb,
     config_edit_sections_kb, config_edit_fields_kb, config_edit_confirm_kb, user_delete_confirm_kb, user_detail_kb, user_edit_kb,
-    user_links_kb, user_links_kb_no_links, users_delete_expired_confirm_kb,
+    user_links_kb, user_links_kb_no_links, users_active_ips_kb, users_delete_expired_confirm_kb,
     users_extra_kb, users_list_kb,
     web_menu_kb, web_sessions_kb, web_session_detail_kb,
 )
@@ -115,7 +123,7 @@ async def _cluster_section(
     else:
         method = getattr(client, api_method)
         data = await _api_call(cq, method, *args)
-        if data:
+        if data is not None:
             await _safe_edit(cq, formatter(data), reply_markup=kb)
 
 
@@ -129,9 +137,13 @@ def _uid(event) -> int:
     return event.from_user.id
 
 
-async def _safe_edit(cq: CallbackQuery, text: str, reply_markup=None):
+async def _safe_edit(cq: CallbackQuery, text: str, reply_markup=None, link_preview=None):
     try:
-        await cq.message.edit_text(text, reply_markup=reply_markup)
+        await cq.message.edit_text(
+            text,
+            reply_markup=reply_markup,
+            link_preview_options=link_preview,
+        )
     except Exception as e:
         logger.debug("_safe_edit: %s", e)
     await cq.answer()
@@ -559,6 +571,16 @@ async def cb_users_quota(cq: CallbackQuery, config: Config):
         await _safe_edit(cq, format_users_quota(data), reply_markup=kb.as_markup())
 
 
+@router.callback_query(F.data == "users:active_ips")
+async def cb_users_active_ips(cq: CallbackQuery, config: Config):
+    await _cluster_section(
+        cq, config,
+        "get_stats_users_active_ips",
+        format_active_ips,
+        users_active_ips_kb(),
+    )
+
+
 @router.callback_query(F.data == "users:extra")
 async def cb_users_extra(cq: CallbackQuery):
     await _safe_edit(cq, "⚙️ <b>Действия со списком</b>", reply_markup=users_extra_kb())
@@ -687,22 +709,13 @@ async def cb_delete_expired(cq: CallbackQuery, config: Config):
         await cq.answer("✅ Нет истёкших пользователей")
         return
 
-    # Удаляем пользователей из WEB-профилей перед удалением
     try:
-        cfg = await client.get_config()
-        web = cfg.get("web", {})
-        vhosts = web.get("vhosts", [])
-        if vhosts:
-            vhost = dict(vhosts[0])
-            profiles = vhost.get("profiles", [])
-            new_profiles = [p for p in profiles if p.get("user") not in expired]
-            if len(new_profiles) < len(profiles):
-                vhost["profiles"] = new_profiles
-                patch = {"web": {"vhosts": [vhost]}}
-                revision = cfg.get("revision", "")
-                await client.patch_config(patch, if_match=revision, reload="instant")
+        for node in members:
+            await _strip_web_profiles(TelemetClient(node.url, node.auth_header), set(expired))
     except Exception as e:
         logger.warning("Failed to remove WEB profiles for expired users: %s", e)
+        await cq.answer(f"❌ Не удалось убрать WEB-профили: {e}"[:200], show_alert=True)
+        return
 
     deleted = errors = 0
     for username in expired:
@@ -785,12 +798,14 @@ async def cb_rotate_secret(cq: CallbackQuery, config: Config):
     new_secret = _gen_secret()
     client, srv = await get_client(_uid(cq), config)
     members = config.get_group_members(srv)
-    results = await cluster_write(members, "patch_user", username, {"secret": new_secret})
+    results = await cluster_write(members, "rotate_secret", username, new_secret)
     ok_results = [r for r in results if r.ok]
     if not ok_results:
         await cq.answer("❌ Не удалось обновить секрет", show_alert=True)
         return
-    user = ok_results[0].data
+    payload = ok_results[0].data if isinstance(ok_results[0].data, dict) else {}
+    user = payload.get("user", payload)
+    new_secret = payload.get("secret", new_secret)
     status = ""
     if not _all_ok(results):
         status = "\n⚠️ " + _format_cluster_result([r for r in results if not r.ok])
@@ -1049,7 +1064,11 @@ async def cb_user_links(cq: CallbackQuery, config: Config):
     except Exception:
         pass
     text, _ = format_user_links(user, web_config, telemt_version)
-    await _safe_edit(cq, text, reply_markup=user_links_kb(username, all_links))
+    await _safe_edit(
+        cq, text,
+        reply_markup=user_links_kb(username, all_links),
+        link_preview=_NO_LINK_PREVIEW,
+    )
 
 
 @router.callback_query(F.data.startswith("user:qr:"))
@@ -1067,9 +1086,9 @@ async def cb_user_qr(cq: CallbackQuery, config: Config):
     await cq.answer("Генерирую QR...")
     link = all_links[index]
     try:
-        png = make_qr_bytes(link)
+        png = make_qr_bytes(proxy_connect_url(link))
         photo = BufferedInputFile(png, filename=f"qr_{username}_{index}.png")
-        caption = f"📷 {username}\n\n<code>{link}</code>"
+        caption = f"📷 {username}\n\n{format_proxy_link(link)}"
         from aiogram.utils.keyboard import InlineKeyboardBuilder
         kb = InlineKeyboardBuilder()
         kb.button(text="◀️ К ссылкам", callback_data=f"qr:back_links:{username}")
@@ -1085,6 +1104,7 @@ async def cb_user_qr(cq: CallbackQuery, config: Config):
             photo=photo,
             caption=caption,
             reply_markup=kb.as_markup(),
+            link_preview_options=_NO_LINK_PREVIEW,
         )
     except Exception as e:
         await cq.answer(f"❌ QR: {e}", show_alert=True)
@@ -1118,6 +1138,7 @@ async def cb_qr_back_links(cq: CallbackQuery, config: Config):
         chat_id=cq.message.chat.id,
         text=text,
         reply_markup=user_links_kb(username, all_links),
+        link_preview_options=_NO_LINK_PREVIEW,
     )
     await cq.answer()
 
@@ -1171,18 +1192,60 @@ async def cb_user_qr_all(cq: CallbackQuery, config: Config):
             kb.button(text="◀️ К клиенту", callback_data=f"qr:back_user:{username}")
             kb.adjust(1)
         try:
-            png = make_qr_bytes(link)
+            png = make_qr_bytes(proxy_connect_url(link))
             await cq.bot.send_photo(
                 chat_id=cq.message.chat.id,
                 photo=BufferedInputFile(png, filename=f"qr_{username}_{i}.png"),
-                caption=f"📷 <b>{label}</b> — {username}\n\n<code>{link}</code>",
+                caption=f"📷 <b>{label}</b> — {username}\n\n{format_proxy_link(link)}",
                 reply_markup=kb.as_markup() if is_last else None,
+                link_preview_options=_NO_LINK_PREVIEW,
             )
         except Exception as e:
             await cq.bot.send_message(cq.message.chat.id, f"❌ QR #{i}: {e}")
 
 
 # ─── Delete ───────────────────────────────────────────────────────────────────
+
+async def _strip_web_profiles(client: TelemetClient, usernames: set[str]) -> None:
+    """Снимает WEB-профили до DELETE /users.
+
+    Пока профиль ссылается на пользователя, telemt отклоняет удаление.
+    reload=instant здесь не вызывается: такой reload держит слот ~15с и
+    отвечает reload_in_progress, из-за чего профиль остаётся на месте.
+    """
+    last_error: Exception | None = None
+    for _ in range(3):
+        cfg = await client.get_config()
+        vhosts = (cfg.get("web") or {}).get("vhosts") or []
+        if not vhosts:
+            return
+        changed = False
+        new_vhosts = []
+        for vhost in vhosts:
+            vhost = dict(vhost)
+            profiles = vhost.get("profiles") or []
+            kept = [p for p in profiles if p.get("user") not in usernames]
+            if len(kept) != len(profiles):
+                changed = True
+                vhost["profiles"] = kept
+            new_vhosts.append(vhost)
+        if not changed:
+            return
+        try:
+            await client.patch_config(
+                {"web": {"vhosts": new_vhosts}},
+                if_match=cfg.get("revision", ""),
+            )
+            return
+        except ApiError as e:
+            last_error = e
+            if e.code in {"revision_conflict", "reload_in_progress"}:
+                await asyncio.sleep(0.4)
+                continue
+            raise
+    if last_error:
+        raise last_error
+
 
 @router.callback_query(F.data.startswith("user:delete_confirm:"))
 async def cb_user_delete_confirm(cq: CallbackQuery):
@@ -1194,26 +1257,16 @@ async def cb_user_delete_confirm(cq: CallbackQuery):
 @router.callback_query(F.data.startswith("user:delete:"))
 async def cb_user_delete(cq: CallbackQuery, config: Config):
     username = cq.data.split(":", 2)[2]
-    client, srv = await get_client(_uid(cq), config)
+    _, srv = await get_client(_uid(cq), config)
     members = config.get_group_members(srv)
 
-    # Сначала удаляем пользователя из WEB-профилей
     try:
-        cfg = await client.get_config()
-        web = cfg.get("web", {})
-        vhosts = web.get("vhosts", [])
-        if vhosts:
-            # Копируем первый vhost и обновляем profiles
-            vhost = dict(vhosts[0])
-            profiles = vhost.get("profiles", [])
-            new_profiles = [p for p in profiles if p.get("user") != username]
-            if len(new_profiles) < len(profiles):
-                vhost["profiles"] = new_profiles
-                patch = {"web": {"vhosts": [vhost]}}
-                revision = cfg.get("revision", "")
-                await client.patch_config(patch, if_match=revision, reload="instant")
+        for node in members:
+            await _strip_web_profiles(TelemetClient(node.url, node.auth_header), {username})
     except Exception as e:
         logger.warning("Failed to remove WEB profile for %s: %s", username, e)
+        await cq.answer(f"❌ Не удалось убрать WEB-профиль: {e}"[:200], show_alert=True)
+        return
 
     results = await cluster_write(members, "delete_user", username)
 
@@ -1300,10 +1353,11 @@ async def cmd_adduser(message: Message, config: Config):
 
     if all_links:
         try:
-            png = make_qr_bytes(all_links[0])
+            png = make_qr_bytes(proxy_connect_url(all_links[0]))
             await message.answer_photo(
                 BufferedInputFile(png, filename=f"qr_{username}.png"),
-                caption=f"📷 {link_short_label(all_links[0], 0)}\n\n<code>{all_links[0]}</code>",
+                caption=f"📷 {link_short_label(all_links[0], 0)}\n\n{format_proxy_link(all_links[0])}",
+                link_preview_options=_NO_LINK_PREVIEW,
             )
         except Exception:
             pass
@@ -1674,7 +1728,10 @@ async def fsm_edit_value(message: Message, state: FSMContext, config: Config):
 
     client, srv = await get_client(_uid(message), config)
     members = config.get_group_members(srv)
-    results = await cluster_write(members, "patch_user", username, {field: value})
+    if field == "secret":
+        results = await cluster_write(members, "rotate_secret", username, value)
+    else:
+        results = await cluster_write(members, "patch_user", username, {field: value})
 
     ok_results = [r for r in results if r.ok]
     if not ok_results:
@@ -1682,7 +1739,8 @@ async def fsm_edit_value(message: Message, state: FSMContext, config: Config):
         await message.answer(f"❌ Не удалось обновить:\n{errors}")
         return
 
-    user = ok_results[0].data
+    payload = ok_results[0].data if isinstance(ok_results[0].data, dict) else {}
+    user = payload.get("user", payload) if field == "secret" else payload
     label = FIELD_LABELS.get(field, (field,))[0]
     status = ""
     if not _all_ok(results):
@@ -1728,6 +1786,36 @@ async def cb_runtime_events(cq: CallbackQuery, config: Config):
 @router.callback_query(F.data == "runtime:connections")
 async def cb_runtime_connections(cq: CallbackQuery, config: Config):
     await _cluster_section(cq, config, "get_runtime_connections", format_connections, runtime_sub_kb("connections"))
+
+
+@router.callback_query(F.data == "runtime:ready")
+async def cb_runtime_ready(cq: CallbackQuery, config: Config):
+    await _cluster_section(cq, config, "get_health_ready", format_health_ready, runtime_sub_kb("ready"))
+
+
+@router.callback_query(F.data == "runtime:me_pool")
+async def cb_runtime_me_pool(cq: CallbackQuery, config: Config):
+    await _cluster_section(cq, config, "get_runtime_me_pool_state", format_me_pool, runtime_sub_kb("me_pool"))
+
+
+@router.callback_query(F.data == "runtime:me_selftest")
+async def cb_runtime_me_selftest(cq: CallbackQuery, config: Config):
+    await _cluster_section(cq, config, "get_runtime_me_selftest", format_me_selftest, runtime_sub_kb("me_selftest"))
+
+
+@router.callback_query(F.data == "runtime:nat_stun")
+async def cb_runtime_nat_stun(cq: CallbackQuery, config: Config):
+    await _cluster_section(cq, config, "get_runtime_nat_stun", format_nat_stun, runtime_sub_kb("nat_stun"))
+
+
+@router.callback_query(F.data == "runtime:zero")
+async def cb_runtime_zero(cq: CallbackQuery, config: Config):
+    await _cluster_section(cq, config, "get_stats_zero_all", format_zero_all, runtime_sub_kb("zero"))
+
+
+@router.callback_query(F.data == "runtime:minimal")
+async def cb_runtime_minimal(cq: CallbackQuery, config: Config):
+    await _cluster_section(cq, config, "get_stats_minimal_all", format_minimal_all, runtime_sub_kb("minimal"))
 
 
 @router.callback_query(F.data == "runtime:tls_fingerprints")

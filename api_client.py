@@ -1,5 +1,5 @@
 """
-Клиент для Telemt Control API v1
+Клиент для Telemt Control API v1 (Telemt 3.5.11).
 """
 
 from __future__ import annotations
@@ -82,11 +82,28 @@ class TelemetClient:
     async def get_health(self) -> dict:
         return await self._request("GET", "/health")
 
+    async def get_health_ready(self) -> dict:
+        """GET /v1/health/ready (3.5.11). 503 всё равно несёт ok=true и HealthReadyData."""
+        return await self._request("GET", "/health/ready")
+
     async def get_system_info(self) -> dict:
         return await self._request("GET", "/system/info")
 
     async def get_stats_summary(self) -> dict:
         return await self._request("GET", "/stats/summary")
+
+    async def get_stats_zero_all(self) -> dict:
+        """GET /v1/stats/zero/all (3.5.11)."""
+        return await self._request("GET", "/stats/zero/all")
+
+    async def get_stats_minimal_all(self) -> dict:
+        """GET /v1/stats/minimal/all (3.5.11)."""
+        return await self._request("GET", "/stats/minimal/all")
+
+    async def get_stats_users_active_ips(self) -> list:
+        """GET /v1/stats/users/active-ips (3.5.11)."""
+        result = await self._request("GET", "/stats/users/active-ips")
+        return result if isinstance(result, list) else []
 
     async def get_runtime_gates(self) -> dict:
         return await self._request("GET", "/runtime/gates")
@@ -115,6 +132,18 @@ class TelemetClient:
     async def get_runtime_me_quality(self) -> dict:
         return await self._request("GET", "/runtime/me_quality")
 
+    async def get_runtime_me_pool_state(self) -> dict:
+        """GET /v1/runtime/me_pool_state (3.5.11)."""
+        return await self._request("GET", "/runtime/me_pool_state")
+
+    async def get_runtime_nat_stun(self) -> dict:
+        """GET /v1/runtime/nat_stun (3.5.11)."""
+        return await self._request("GET", "/runtime/nat_stun")
+
+    async def get_runtime_me_selftest(self) -> dict:
+        """GET /v1/runtime/me-selftest (3.5.11)."""
+        return await self._request("GET", "/runtime/me-selftest")
+
     async def get_runtime_upstream_quality(self) -> dict:
         return await self._request("GET", "/runtime/upstream_quality")
 
@@ -140,6 +169,18 @@ class TelemetClient:
 
     async def patch_user(self, username: str, payload: dict) -> dict:
         return await self._request("PATCH", f"/users/{username}", json=payload)
+
+    async def rotate_secret(self, username: str, secret: str) -> dict:
+        """POST /v1/users/{username}/rotate-secret (3.5.11).
+
+        Смена секрета идёт этим вызовом: он обновляет admission identity
+        и WEB capability. Ответ — CreateUserResponse {user, secret}.
+        """
+        return await self._request(
+            "POST",
+            f"/users/{username}/rotate-secret",
+            json={"secret": secret},
+        )
 
     async def enable_user(self, username: str) -> dict:
         """POST /v1/users/{username}/enable (3.4.14+)"""
