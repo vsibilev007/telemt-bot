@@ -2,7 +2,7 @@
 
 # ---- builder ----------------------------------------------------------------
 # Пин по digest (python:3.11-slim-bookworm) для воспроизводимости и безопасности.
-FROM python:3.11-slim-bookworm@sha256:74012ddba2bc217440b5dc8ea21012baa9ef20eab68bccfd98f269e0b1da581f AS builder
+FROM python:3.11-slim-bookworm@sha256:2333bd330d12de02514770b3585cad313644316047cdee24a7acfdece6de6efb AS builder
 
 ENV PIP_NO_CACHE_DIR=1 \
     PIP_DISABLE_PIP_VERSION_CHECK=1 \
@@ -23,7 +23,7 @@ RUN python -m venv "$VIRTUAL_ENV" \
     && find "$VIRTUAL_ENV" -type f \( -name '*.pyc' -o -name '*.pyx' -o -name '*.pyi' \) -delete
 
 # ---- final ------------------------------------------------------------------
-FROM python:3.11-slim-bookworm@sha256:74012ddba2bc217440b5dc8ea21012baa9ef20eab68bccfd98f269e0b1da581f AS final
+FROM python:3.11-slim-bookworm@sha256:2333bd330d12de02514770b3585cad313644316047cdee24a7acfdece6de6efb AS final
 
 ENV PATH=/opt/venv/bin:$PATH \
     PYTHONUNBUFFERED=1 \
