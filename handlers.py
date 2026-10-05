@@ -34,7 +34,7 @@ from formatters import (
     format_runtime_gates, format_runtime_init, format_security_posture,
     format_active_ips, format_zero_all,
     format_security_whitelist, format_tls_fingerprints, format_upstream_quality,
-    format_upstreams, format_user_detail, format_user_links, format_proxy_link,
+    format_upstreams, format_user_detail, format_user_links,
     format_users_quota, fmt_bytes,
 )
 from keyboards import (
@@ -1178,7 +1178,6 @@ async def cmd_adduser(message: Message, config: Config):
 
     result = ok_results[0].data
     user = result.get("user", result)
-    all_links = _get_all_links(user)
 
     # Автоматически добавляем пользователя в WEB-профили
     try:
