@@ -135,6 +135,14 @@ def _uid(event) -> int:
     return event.from_user.id
 
 
+async def _lite_blocked(message: Message, config: Config) -> bool:
+    """True, если команда отключена в lite-режиме (ответ уже отправлен)."""
+    if config.lite_mode:
+        await message.answer("⛔ Команда недоступна в lite-режиме (LITE_MODE=true)")
+        return True
+    return False
+
+
 async def _safe_edit(cq: CallbackQuery, text: str, reply_markup=None, link_preview=None):
     try:
         await cq.message.edit_text(
@@ -1281,6 +1289,8 @@ async def _do_search(message: Message, query: str, config: Config):
 
 @router.message(Command("alert_log"))
 async def cmd_alert_log(message: Message, config: Config):
+    if await _lite_blocked(message, config):
+        return
     _, srv = await get_client(_uid(message), config)
     members = config.get_group_members(srv)
 
@@ -1742,7 +1752,10 @@ def _proxy_prompt_kb() -> InlineKeyboardMarkup:
 
 
 @router.callback_query(F.data == "menu:proxy_check")
-async def cb_proxy_check_menu(cq: CallbackQuery, state: FSMContext):
+async def cb_proxy_check_menu(cq: CallbackQuery, state: FSMContext, config: Config):
+    if config.lite_mode:
+        await cq.answer("⛔ Недоступно в lite-режиме", show_alert=True)
+        return
     await state.set_state(ProxyCheckFSM.waiting_url)
     await cq.answer()
     await cq.message.answer(
@@ -1755,7 +1768,10 @@ async def cb_proxy_check_menu(cq: CallbackQuery, state: FSMContext):
 
 
 @router.callback_query(F.data == "proxy:check_again")
-async def cb_proxy_check_again(cq: CallbackQuery, state: FSMContext):
+async def cb_proxy_check_again(cq: CallbackQuery, state: FSMContext, config: Config):
+    if config.lite_mode:
+        await cq.answer("⛔ Недоступно в lite-режиме", show_alert=True)
+        return
     await state.set_state(ProxyCheckFSM.waiting_url)
     await cq.answer()
     await cq.message.answer(
@@ -1767,6 +1783,8 @@ async def cb_proxy_check_again(cq: CallbackQuery, state: FSMContext):
 @router.message(ProxyCheckFSM.waiting_url, F.text.regexp(r"^[^/]"))
 async def fsm_proxy_check_url(message: Message, state: FSMContext, config: Config):
     await state.clear()
+    if await _lite_blocked(message, config):
+        return
     url = message.text.strip()
 
     if not (url.startswith("tg://") or "t.me/proxy" in url):
@@ -1808,8 +1826,10 @@ async def fsm_proxy_check_url(message: Message, state: FSMContext, config: Confi
 # ─── /check — расширенная диагностика узла ────────────────────────────────────
 
 @router.message(Command("check"))
-async def cmd_check(message: Message, state: FSMContext):
+async def cmd_check(message: Message, state: FSMContext, config: Config):
     """/check tg://proxy?... — полная диагностика узла"""
+    if await _lite_blocked(message, config):
+        return
     text = message.text.replace("/check", "", 1).strip()
     if text:
         await _do_node_check(message, state, text)
@@ -1826,6 +1846,8 @@ async def cmd_check(message: Message, state: FSMContext):
 @router.message(NodeCheckFSM.waiting_url, F.text.regexp(r"^[^/]"))
 async def fsm_node_check_url(message: Message, state: FSMContext, config: Config):
     await state.clear()
+    if await _lite_blocked(message, config):
+        return
     url = message.text.strip()
     if url.startswith("/check"):
         url = url.replace("/check", "", 1).strip()
@@ -2184,6 +2206,8 @@ async def cb_config_edit_confirm(cq: CallbackQuery, state: FSMContext):
 @router.message(Command("reload"))
 async def cmd_reload(message: Message, config: Config):
     """/reload [instant|drain] — runtime reload без перезапуска процесса"""
+    if await _lite_blocked(message, config):
+        return
     args = message.text.replace("/reload", "", 1).strip().split()
     mode = args[0] if args else "instant"
 
@@ -2225,6 +2249,8 @@ async def cmd_reload(message: Message, config: Config):
 @router.message(Command("reload_status"))
 async def cmd_reload_status(message: Message, config: Config):
     """/reload_status <id> — проверить статус reload операции"""
+    if await _lite_blocked(message, config):
+        return
     args = message.text.replace("/reload_status", "", 1).strip().split()
     if not args or not args[0].isdigit():
         await message.answer("Использование: <code>/reload_status &lt;id&gt;</code>")
@@ -2586,6 +2612,8 @@ ALERT_LABELS = {
 
 @router.message(Command("alerts"))
 async def cmd_alerts(message: Message, config: Config):
+    if await _lite_blocked(message, config):
+        return
     uid = _uid(message)
     idx = await get_server_index(uid, config)
     srv = config.servers[idx]
@@ -2616,6 +2644,9 @@ async def cmd_alerts(message: Message, config: Config):
 
 @router.callback_query(F.data.startswith("alert:toggle:"))
 async def cb_alert_toggle(cq: CallbackQuery, config: Config):
+    if config.lite_mode:
+        await cq.answer("⛔ Недоступно в lite-режиме", show_alert=True)
+        return
     uid = _uid(cq)
     alert_type = cq.data.split(":")[-1]
     idx = await get_server_index(uid, config)
