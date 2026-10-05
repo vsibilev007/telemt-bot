@@ -64,6 +64,9 @@ docker compose up -d
 | `/check tg://proxy?...` | Node diagnostics |
 | `/reload [instant\|drain]` | Runtime reload (3.4.25+) |
 | `/alerts` | Alert settings |
+| `/alert_log` | Last 20 alert history |
+| `/status` | Status of all servers |
+| `/reload_status id` | Runtime reload operation status |
 | `/id` | Your Telegram ID |
 
 ---

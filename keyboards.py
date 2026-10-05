@@ -311,6 +311,7 @@ def alerts_kb(states: dict[str, bool] | None = None) -> InlineKeyboardMarkup:
         "hs_timeout_spike": "Всплеск HS timeout",
         "bad_client_spike": "Всплеск плохих TLS",
         "hs_conn_reset":    "Сброс при handshake",
+        "quota_warn":       "Превышение квоты",
     }
     kb = InlineKeyboardBuilder()
     for atype, alabel in labels.items():

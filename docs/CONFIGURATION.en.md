@@ -56,13 +56,15 @@ SERVER_2_GROUP=cluster_ha
 | Variable | Description | Default |
 |----------|-------------|---------|
 | `TZ` | Timezone | System |
-| `LITE_MODE` | Minimal mode without alerts/charts | `false` |
+| `LITE_MODE` | Minimal mode: no scheduler/alerts, reduced menu | `false` |
 | `LOG_LEVEL` | Log level | `INFO` |
 | `LOG_FILE` | Log file path | stdout |
 | `LOG_MAX_MB` | Max log file size | `10` |
 | `LOG_BACKUPS` | Number of backups | `3` |
 | `NO_COLOR` | Disable ANSI colors | — |
 | `TELEMT_CONFIG_PATH` | Path to telemt.toml | `/etc/telemt/telemt.toml` |
+| `TELEMT_BOT_DB_PATH` | Database file path | Next to script (`/data/` in Docker) |
+| `TELEMT_BOT_HEARTBEAT_PATH` | Heartbeat file for Docker HEALTHCHECK | `/tmp/healthy` |
 
 ---
 
