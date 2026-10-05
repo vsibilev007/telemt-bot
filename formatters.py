@@ -88,7 +88,11 @@ def make_webproxy_link(
 
 
 def proxy_connect_url(link: str) -> str:
-    """Ссылка, которую Telegram открывает как подключение прокси, а не копирует."""
+    """HTTPS-форма ссылки (https://t.me/proxy|webproxy?...).
+
+    Используется в QR-кодах: открывается любым устройством, в том числе
+    камерой телефона вне Telegram.
+    """
     parsed = urllib.parse.urlparse(link.strip())
     if parsed.scheme == "tg" and parsed.netloc in {"proxy", "webproxy"} and parsed.query:
         return f"https://t.me/{parsed.netloc}?{parsed.query}"
@@ -99,8 +103,24 @@ def proxy_connect_url(link: str) -> str:
     return link.strip()
 
 
+def tg_deep_link(link: str) -> str:
+    """tg://-глубокая ссылка: клик в Telegram открывает окно добавления прокси.
+
+    https://t.me/proxy|webproxy?... конвертируется обратно в tg://,
+    прочие ссылки возвращаются без изменений.
+    """
+    parsed = urllib.parse.urlparse(link.strip())
+    if parsed.scheme == "tg" and parsed.netloc in {"proxy", "webproxy"} and parsed.query:
+        return f"tg://{parsed.netloc}?{parsed.query}"
+    if parsed.scheme in {"http", "https"} and parsed.netloc in {"t.me", "telegram.me"}:
+        path = parsed.path.lstrip("/")
+        if path in {"proxy", "webproxy"} and parsed.query:
+            return f"tg://{path}?{parsed.query}"
+    return link.strip()
+
+
 def format_proxy_link(link: str, label: str = "Подключить") -> str:
-    href = html.escape(proxy_connect_url(link), quote=True)
+    href = html.escape(tg_deep_link(link), quote=True)
     return f'<a href="{href}">{html.escape(label)}</a>'
 
 
