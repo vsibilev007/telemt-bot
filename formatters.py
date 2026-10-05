@@ -87,22 +87,6 @@ def make_webproxy_link(
     return f"tg://webproxy?server={server}&secret={secret}"
 
 
-def proxy_connect_url(link: str) -> str:
-    """HTTPS-форма ссылки (https://t.me/proxy|webproxy?...).
-
-    Используется в QR-кодах: открывается любым устройством, в том числе
-    камерой телефона вне Telegram.
-    """
-    parsed = urllib.parse.urlparse(link.strip())
-    if parsed.scheme == "tg" and parsed.netloc in {"proxy", "webproxy"} and parsed.query:
-        return f"https://t.me/{parsed.netloc}?{parsed.query}"
-    if parsed.scheme in {"http", "https"} and parsed.netloc in {"t.me", "telegram.me"}:
-        path = parsed.path.lstrip("/")
-        if path in {"proxy", "webproxy"} and parsed.query:
-            return f"https://t.me/{path}?{parsed.query}"
-    return link.strip()
-
-
 def tg_deep_link(link: str) -> str:
     """tg://-глубокая ссылка: клик в Telegram открывает окно добавления прокси.
 

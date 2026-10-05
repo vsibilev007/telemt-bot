@@ -35,7 +35,6 @@ from formatters import (
     format_active_ips, format_zero_all,
     format_security_whitelist, format_tls_fingerprints, format_upstream_quality,
     format_upstreams, format_user_detail, format_user_links, format_proxy_link,
-    proxy_connect_url,
     format_users_quota, fmt_bytes,
 )
 from keyboards import (
@@ -44,11 +43,10 @@ from keyboards import (
     sysinfo_kb, traffic_period_kb, traffic_report_kb, upstreams_kb,
     proxy_check_kb,
     config_edit_sections_kb, config_edit_fields_kb, config_edit_confirm_kb, user_delete_confirm_kb, user_detail_kb, user_edit_kb,
-    user_links_kb, user_links_kb_no_links, users_active_ips_kb, users_delete_expired_confirm_kb,
+    user_links_kb, users_active_ips_kb, users_delete_expired_confirm_kb,
     users_extra_kb, users_list_kb,
     web_menu_kb, web_sessions_kb, web_session_detail_kb,
 )
-from qr_utils import make_qr_bytes, link_short_label
 from session import get_client, get_server_index, set_server_index
 from sysinfo import get_system_info, format_system_status
 import charts
@@ -1039,7 +1037,7 @@ async def cb_traffic_report_chart(cq: CallbackQuery, config: Config):
         )
 
 
-# ─── Links + QR ───────────────────────────────────────────────────────────────
+# ─── Links ────────────────────────────────────────────────────────────────────
 
 @router.callback_query(F.data.startswith("user:links:"))
 async def cb_user_links(cq: CallbackQuery, config: Config):
@@ -1051,7 +1049,7 @@ async def cb_user_links(cq: CallbackQuery, config: Config):
     all_links = _get_all_links(user)
     if not all_links:
         await _safe_edit(cq, f"<b>🔗 Ссылки — {username}</b>\n\n— нет ссылок —",
-                         reply_markup=user_links_kb_no_links(username))
+                         reply_markup=user_links_kb(username))
         return
     # Получаем WEB-конфиг и версию Telemt
     web_config = None
@@ -1066,142 +1064,9 @@ async def cb_user_links(cq: CallbackQuery, config: Config):
     text, _ = format_user_links(user, web_config, telemt_version)
     await _safe_edit(
         cq, text,
-        reply_markup=user_links_kb(username, all_links),
+        reply_markup=user_links_kb(username),
         link_preview=_NO_LINK_PREVIEW,
     )
-
-
-@router.callback_query(F.data.startswith("user:qr:"))
-async def cb_user_qr(cq: CallbackQuery, config: Config):
-    parts = cq.data.split(":")
-    index, username = int(parts[-1]), ":".join(parts[2:-1])
-    client, _ = await get_client(_uid(cq), config)
-    user = await _api_call(cq, client.get_user, username)
-    if user is None:
-        return
-    all_links = _get_all_links(user)
-    if index >= len(all_links):
-        await cq.answer("Ссылка не найдена", show_alert=True)
-        return
-    await cq.answer("Генерирую QR...")
-    link = all_links[index]
-    try:
-        png = make_qr_bytes(proxy_connect_url(link))
-        photo = BufferedInputFile(png, filename=f"qr_{username}_{index}.png")
-        caption = f"📷 {username}\n\n{format_proxy_link(link)}"
-        from aiogram.utils.keyboard import InlineKeyboardBuilder
-        kb = InlineKeyboardBuilder()
-        kb.button(text="◀️ К ссылкам", callback_data=f"qr:back_links:{username}")
-        kb.button(text="◀️ К клиенту", callback_data=f"qr:back_user:{username}")
-        kb.adjust(1)
-        # Удаляем текстовое сообщение, отправляем фото
-        try:
-            await cq.message.delete()
-        except Exception:
-            pass
-        await cq.bot.send_photo(
-            chat_id=cq.message.chat.id,
-            photo=photo,
-            caption=caption,
-            reply_markup=kb.as_markup(),
-            link_preview_options=_NO_LINK_PREVIEW,
-        )
-    except Exception as e:
-        await cq.answer(f"❌ QR: {e}", show_alert=True)
-
-
-@router.callback_query(F.data.startswith("qr:back_links:"))
-async def cb_qr_back_links(cq: CallbackQuery, config: Config):
-    """Возврат к ссылкам из QR-фото — удаляем фото, показываем ссылки"""
-    username = cq.data.split(":", 2)[2]
-    try:
-        await cq.message.delete()
-    except Exception:
-        pass
-    client, _ = await get_client(_uid(cq), config)
-    user = await _api_call(cq, client.get_user, username)
-    if user is None:
-        return
-    all_links = _get_all_links(user)
-    # Получаем WEB-конфиг и версию Telemt
-    web_config = None
-    telemt_version = ""
-    try:
-        cfg = await client.get_config()
-        web_config = cfg.get("web", {})
-        info = await client.get_system_info()
-        telemt_version = info.get("version", "")
-    except Exception:
-        pass
-    text, _ = format_user_links(user, web_config, telemt_version)
-    await cq.bot.send_message(
-        chat_id=cq.message.chat.id,
-        text=text,
-        reply_markup=user_links_kb(username, all_links),
-        link_preview_options=_NO_LINK_PREVIEW,
-    )
-    await cq.answer()
-
-
-@router.callback_query(F.data.startswith("qr:back_user:"))
-async def cb_qr_back_user(cq: CallbackQuery, config: Config):
-    """Возврат к клиенту из QR-фото — удаляем фото, показываем карточку"""
-    username = cq.data.split(":", 2)[2]
-    try:
-        await cq.message.delete()
-    except Exception:
-        pass
-    client, _ = await get_client(_uid(cq), config)
-    user = await _api_call(cq, client.get_user, username)
-    if user is None:
-        return
-    await cq.bot.send_message(
-        chat_id=cq.message.chat.id,
-        text=format_user_detail(user),
-        reply_markup=user_detail_kb(username, enabled=user.get("enabled", None)),
-    )
-    await cq.answer()
-
-
-@router.callback_query(F.data.startswith("user:qr_all:"))
-async def cb_user_qr_all(cq: CallbackQuery, config: Config):
-    username = cq.data.split(":", 2)[2]
-    client, _ = await get_client(_uid(cq), config)
-    user = await _api_call(cq, client.get_user, username)
-    if user is None:
-        return
-    all_links = _get_all_links(user)
-    if not all_links:
-        await cq.answer("Ссылок нет", show_alert=True)
-        return
-    await cq.answer(f"Генерирую {len(all_links)} QR...")
-
-    from aiogram.utils.keyboard import InlineKeyboardBuilder
-
-    # Удаляем исходное сообщение со ссылками
-    try:
-        await cq.message.delete()
-    except Exception:
-        pass
-
-    for i, link in enumerate(all_links):
-        label = link_short_label(link, i)
-        is_last = (i == len(all_links) - 1)
-        kb = InlineKeyboardBuilder()
-        if is_last:
-            kb.button(text="◀️ К клиенту", callback_data=f"qr:back_user:{username}")
-            kb.adjust(1)
-        try:
-            png = make_qr_bytes(proxy_connect_url(link))
-            await cq.bot.send_photo(
-                chat_id=cq.message.chat.id,
-                photo=BufferedInputFile(png, filename=f"qr_{username}_{i}.png"),
-                caption=f"📷 <b>{label}</b> — {username}\n\n{format_proxy_link(link)}",
-                reply_markup=kb.as_markup() if is_last else None,
-                link_preview_options=_NO_LINK_PREVIEW,
-            )
-        except Exception as e:
-            await cq.bot.send_message(cq.message.chat.id, f"❌ QR #{i}: {e}")
 
 
 # ─── Delete ───────────────────────────────────────────────────────────────────
@@ -1350,17 +1215,6 @@ async def cmd_adduser(message: Message, config: Config):
         msg += f"📅 Срок: {days} дней\n"
     msg += "\n" + format_user_detail(user)
     await message.answer(msg, reply_markup=user_detail_kb(username, enabled=user.get("enabled", None)))
-
-    if all_links:
-        try:
-            png = make_qr_bytes(proxy_connect_url(all_links[0]))
-            await message.answer_photo(
-                BufferedInputFile(png, filename=f"qr_{username}.png"),
-                caption=f"📷 {link_short_label(all_links[0], 0)}\n\n{format_proxy_link(all_links[0])}",
-                link_preview_options=_NO_LINK_PREVIEW,
-            )
-        except Exception:
-            pass
 
 
 # ─── /find — поиск клиента ────────────────────────────────────────────────────
@@ -2872,12 +2726,11 @@ async def cmd_help(message: Message):
         "\n"
         "<b>Карточка клиента</b>\n"
         "Редактирование полей • смена секрета • 🔄 сброс квоты • "
-        "📊 история трафика с 📈 графиком (24ч / 7 / 14 / 30 дней) • "
-        "QR-коды с доменами маскировки\n"
+        "📊 история трафика с 📈 графиком (24ч / 7 / 14 / 30 дней)\n"
         "\n"
         "<b>Ссылки</b>\n"
         "Над каждой TLS-ссылкой показывается домен маскировки (SNI)\n"
-        "QR-кнопки отображают домен вместоgeneric «QR»\n"
+        "«Подключить» открывает окно добавления прокси в Telegram\n"
         "\n"
         "<b>Алерты</b> — 9 типов:\n"
         "падение / восстановление сервера • всплеск соединений • "

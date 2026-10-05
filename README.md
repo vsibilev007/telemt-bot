@@ -29,7 +29,7 @@ docker compose up -d
 
 | Category | Capabilities |
 |----------|-------------|
-| **Client Management** | Create, edit, delete users; QR codes; traffic history with charts |
+| **Client Management** | Create, edit, delete users; traffic history with charts |
 | **Monitoring** | Dashboard, runtime, security, DC/Writers, upstreams |
 | **Alerts** | 10 event types with configurable thresholds and cooldowns |
 | **HA Cluster** | Parallel write operations across nodes, aggregated reads |
