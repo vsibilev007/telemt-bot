@@ -38,6 +38,7 @@ from formatters import (
     format_users_quota, fmt_bytes,
 )
 from keyboards import (
+    ALERT_LABELS,
     alerts_kb, dashboard_kb, dcs_kb, dcs_sub_kb, export_menu_kb,
     main_menu_kb, runtime_kb, runtime_sub_kb, security_kb, security_sub_kb,
     sysinfo_kb, traffic_period_kb, traffic_report_kb, upstreams_kb,
@@ -2718,20 +2719,6 @@ async def cb_web_resume(cq: CallbackQuery, config: Config):
 #        "Хранение: 30 дней",
 #        reply_markup=alerts_kb(),
 #    )
-ALERT_LABELS = {
-    "status_down":      "Падение сервера",
-    "status_up":        "Восстановление",
-    "conn_spike":       "Всплеск соединений",
-    "writers_low":      "Writers coverage",
-    "version_change":   "Обновление версии",
-    "bad_unknown_sni":  "Неизвестный SNI",
-    "hs_timeout_spike": "Всплеск HS timeout",
-    "bad_client_spike": "Всплеск плохих TLS",
-    "hs_conn_reset":    "Сброс при handshake",
-    "quota_warn":       "Превышение квоты",
-}
-
-
 @router.message(Command("alerts"))
 async def cmd_alerts(message: Message, config: Config):
     if await _lite_blocked(message, config):
@@ -2749,6 +2736,7 @@ async def cmd_alerts(message: Message, config: Config):
         "Автоматические уведомления:\n"
         "  🔴 Падение сервера\n"
         "  🟢 Восстановление\n"
+        "  ⚠ Готовность: admission/upstreams (3.5.11+)\n"
         "  ⚠ Всплеск соединений &gt;50%\n"
         "  ⚠ ME Writers coverage &lt;80%\n"
         "  🏷 Обновление версии\n"

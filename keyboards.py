@@ -299,23 +299,27 @@ def traffic_report_kb(chart_mode: bool = False) -> InlineKeyboardMarkup:
     return kb.as_markup()
 
 
+# Единый источник типов алертов: используется и в /alerts (handlers),
+# и в клавиатуре — расхождение ломает отрисовку тумблеров.
+ALERT_LABELS = {
+    "status_down":      "Падение сервера",
+    "status_up":        "Восстановление",
+    "not_ready":        "Готовность (admission/upstreams)",
+    "conn_spike":       "Всплеск соединений",
+    "writers_low":      "Writers coverage",
+    "version_change":   "Обновление версии",
+    "bad_unknown_sni":  "Неизвестный SNI",
+    "hs_timeout_spike": "Всплеск HS timeout",
+    "bad_client_spike": "Всплеск плохих TLS",
+    "hs_conn_reset":    "Сброс при handshake",
+    "quota_warn":       "Превышение квоты",
+}
+
+
 def alerts_kb(states: dict[str, bool] | None = None) -> InlineKeyboardMarkup:
     states = states or {}
-    labels = {
-        "status_down":      "Падение сервера",
-        "status_up":        "Восстановление",
-        "not_ready":        "Готовность (admission/upstreams)",
-        "conn_spike":       "Всплеск соединений",
-        "writers_low":      "Writers coverage",
-        "version_change":   "Обновление версии",
-        "bad_unknown_sni":  "Неизвестный SNI",
-        "hs_timeout_spike": "Всплеск HS timeout",
-        "bad_client_spike": "Всплеск плохих TLS",
-        "hs_conn_reset":    "Сброс при handshake",
-        "quota_warn":       "Превышение квоты",
-    }
     kb = InlineKeyboardBuilder()
-    for atype, alabel in labels.items():
+    for atype, alabel in ALERT_LABELS.items():
         mark = "✅" if states.get(atype, False) else "☑️"
         kb.button(text=f"{mark} {alabel}", callback_data=f"alert:toggle:{atype}")
     kb.button(text="◀ Меню", callback_data="menu:main")

@@ -1,6 +1,6 @@
 """Тесты клавиатур: наличие кнопок reload и лимит callback_data (64 байта)."""
 
-from keyboards import config_edit_after_kb, config_edit_fields_kb
+from keyboards import ALERT_LABELS, alerts_kb, config_edit_after_kb, config_edit_fields_kb
 
 
 def _buttons(kb):
@@ -45,6 +45,28 @@ class TestConfigEditAfterKb:
         texts = [b.text for b in _buttons(kb)]
         assert "⚡ Reload instant" not in texts
         assert "◀️ К секции" in texts
+
+
+class TestAlertsKb:
+    def test_toggle_for_every_alert_type(self):
+        # Регрессия: типы алертов в keyboard и handlers разошлись —
+        # тумблер not_ready рисовался, но состояние всегда было выключено
+        kb = alerts_kb({})
+        data = [b.callback_data for b in _buttons(kb)]
+        for atype in ALERT_LABELS:
+            assert f"alert:toggle:{atype}" in data
+
+    def test_enabled_type_marked_with_check(self):
+        kb = alerts_kb({"not_ready": True})
+        for b in _buttons(kb):
+            if b.callback_data == "alert:toggle:not_ready":
+                assert b.text.startswith("✅")
+
+    def test_disabled_type_marked_unchecked(self):
+        kb = alerts_kb({})
+        for b in _buttons(kb):
+            if b.callback_data == "alert:toggle:not_ready":
+                assert b.text.startswith("☑️")
 
 
 class TestCallbackDataLimit:
