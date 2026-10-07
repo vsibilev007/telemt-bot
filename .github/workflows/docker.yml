@@ -24,8 +24,17 @@ jobs:
         with:
           args: check .
 
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - name: Install dependencies
+        run: python3 -m venv .venv && .venv/bin/pip install -r requirements.txt pytest
+      - name: Run tests
+        run: .venv/bin/python -m pytest tests/ -q
+
   build-push:
-    needs: lint
+    needs: [lint, test]
     runs-on: ubuntu-latest
     permissions:
       contents: read

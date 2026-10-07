@@ -1,5 +1,39 @@
 # Release Notes
 
+## Config Editor Reload
+
+- **Apply + reload in one request** — "⚡ +instant" / "🌙 +drain" buttons next to "Применить" (PATCH /v1/config?reload=..., single If-Match revision)
+- **Post-apply reload offer** — after a patch that reports `runtime_reload_required`, the bot offers instant/drain reload buttons (POST /v1/system/reload)
+- **Accurate restart reporting** — uses `runtime_reload_required` / `process_restart_required` / `deferred_process_fields`; falls back to legacy `restart_required` on Telemt 3.4.16–3.4.24
+- **Version gating** — reload buttons hidden on Telemt < 3.4.25
+
+## WEB Operations Polling
+
+- **Close operation status** — after closing a WEB session the bot polls `GET /v1/runtime/web/operations/{id}` up to ~6s and reports the terminal state with counters (matched/signalled) or failure reason
+- Removed duplicated `get_web_status` call in the close handler
+
+## Readiness Alert (Telemt 3.5.11+)
+
+- **New alert type `not_ready`** — every 2 min the bot checks `GET /v1/health/ready` and alerts when the server stops accepting new clients (`admission_closed` / `no_healthy_upstreams`), plus recovery notice
+- Toggle in /alerts — "Готовность (admission/upstreams)"; endpoint 404 on older Telemt is auto-detected and skipped
+
+## HTTP Session Reuse
+
+- **Keep-alive pool** — `api_client` now reuses one `aiohttp.ClientSession` per API instance instead of creating a session per request (no TCP/TLS handshake on every call)
+- Single retry on `ServerDisconnectedError` (idle keep-alive connection closed by server)
+- Sessions closed on bot shutdown (`close_http_sessions()`)
+
+## Tests & CI
+
+- **pytest suite** — parser tests for `parse_proxy_url` (classic/dd/FakeTLS SNI), `_parse_config_value`, `_parse_exp`, `_version_at_least`, SNI/secret extraction, `make_webproxy_link`, `tg_deep_link`, config-editor keyboards (incl. 64-byte callback_data limit)
+- Run locally: `python3 -m venv .venv && .venv/bin/pip install -r requirements.txt pytest && .venv/bin/python -m pytest tests/ -q`
+- **CI** — new `test` job (venv + pytest) gates the build alongside lint
+
+## Cleanup
+
+- Removed unused `telethon` dependency and its logger silencing
+- `tests/` and `conftest.py` excluded from the Docker image
+
 ## WEB Proxy Support (Telemt 3.5.5+)
 
 - **WEB Proxy menu** — new button in main menu (visible only for Telemt 3.5.5+)

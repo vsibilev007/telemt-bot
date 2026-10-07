@@ -132,10 +132,6 @@ def setup_logging() -> None:
         "asyncio":              logging.WARNING,
         "PIL":                  logging.WARNING,
         "aiosqlite":            logging.WARNING,  # подавляем DEBUG операции SQLite
-        "telethon":             logging.ERROR,
-        "telethon.network":     logging.ERROR,
-        "telethon.crypto":      logging.ERROR,
-        "telethon.client":      logging.ERROR,
     }
     for name, lvl in _quiet.items():
         logging.getLogger(name).setLevel(lvl)

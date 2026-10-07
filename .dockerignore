@@ -23,6 +23,10 @@ __pycache__/
 .mypy_cache/
 .pytest_cache/
 
+# Tests (в образ не нужны)
+tests/
+conftest.py
+
 # Docs / meta
 *.md
 LICENSE
