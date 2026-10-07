@@ -185,6 +185,40 @@ async def _check_health():
                     cooldown=0,
                 )
 
+            # Готовность принимать новых клиентов: /v1/health/ready (3.5.11+).
+            # /health всегда ok, поэтому неготовность (admission закрыт или нет
+            # здоровых upstream'ов) видна только здесь.
+            if await _get_meta(srv.name, "ready_endpoint") != "unsupported":
+                try:
+                    ready = await client.get_health_ready()
+                    ready_flag = bool(ready.get("ready", True))
+                    reason = ready.get("reason") or ""
+                except ApiError as e:
+                    if e.status == 404:
+                        await _set_meta(srv.name, "ready_endpoint", "unsupported")
+                    ready_flag, reason = True, ""
+                except Exception:
+                    ready_flag, reason = True, ""
+
+                prev_ready = await _get_meta(srv.name, "ready_state")
+                await _set_meta(srv.name, "ready_state", "1" if ready_flag else "0")
+                if prev_ready == "1" and not ready_flag:
+                    human = {
+                        "admission_closed": "приём соединений закрыт",
+                        "no_healthy_upstreams": "нет здоровых upstream'ов",
+                    }.get(reason, reason or "not_ready")
+                    await _fire_alert(
+                        srv.name, "not_ready",
+                        f"⚠️ <b>{srv.name}</b> — не принимает новых клиентов: {human}",
+                        cooldown=300,
+                    )
+                elif prev_ready == "0" and ready_flag:
+                    await _fire_alert(
+                        srv.name, "not_ready",
+                        f"🟢 <b>{srv.name}</b> — готовность восстановлена: принимает клиентов",
+                        cooldown=0,
+                    )
+
             # Всплеск соединений
             if prev and prev["connections"] > thr.conn_spike_min_base:
                 delta_pct = (connections - prev["connections"]) / prev["connections"] * 100

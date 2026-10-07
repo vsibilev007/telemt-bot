@@ -42,7 +42,7 @@ from keyboards import (
     main_menu_kb, runtime_kb, runtime_sub_kb, security_kb, security_sub_kb,
     sysinfo_kb, traffic_period_kb, traffic_report_kb, upstreams_kb,
     proxy_check_kb,
-    config_edit_sections_kb, config_edit_fields_kb, config_edit_confirm_kb, user_delete_confirm_kb, user_detail_kb, user_edit_kb,
+    config_edit_sections_kb, config_edit_fields_kb, config_edit_after_kb, user_delete_confirm_kb, user_detail_kb, user_edit_kb,
     user_links_kb, users_active_ips_kb, users_delete_expired_confirm_kb,
     users_extra_kb, users_list_kb,
     web_menu_kb, web_sessions_kb, web_session_detail_kb,
@@ -188,6 +188,17 @@ async def _get_telemt_version(client) -> str:
         return version
     except Exception:
         return ""
+
+
+def _version_at_least(version: str, major: int, minor: int, patch: int = 0) -> bool:
+    """True, если версия >= указанной. Пустая/неразборчивая версия → True (не ограничиваем)."""
+    try:
+        parts = tuple(int(p) for p in version.split(".")[:3])
+        if len(parts) < 3:
+            parts = parts + (0,) * (3 - len(parts))
+        return parts >= (major, minor, patch)
+    except (ValueError, AttributeError):
+        return True
 
 
 def _get_all_links(user: dict) -> list[str]:
@@ -1961,7 +1972,7 @@ async def cb_config_edit_back(cq: CallbackQuery, config: Config):
 
 
 @router.callback_query(F.data.startswith("configedit:section:"))
-async def cb_config_edit_section(cq: CallbackQuery, state: FSMContext):
+async def cb_config_edit_section(cq: CallbackQuery, state: FSMContext, config: Config):
     """Показать поля секции."""
     section = cq.data.split(":")[2]
     uid = _uid(cq)
@@ -1999,10 +2010,19 @@ async def cb_config_edit_section(cq: CallbackQuery, state: FSMContext):
         return
 
     # Показать текущие значения полей
+    # Кнопки "+reload" появились в PATCH /v1/config?reload= (Telemt 3.4.25+)
+    client, srv = await get_client(uid, config)
+    version = await _get_telemt_version(client)
+    supports_reload = _version_at_least(version, 3, 4, 25)
     await _safe_edit(
         cq,
         f"<b>⚙️ [{section}]</b>\n\nВыберите поле:",
-        reply_markup=config_edit_fields_kb(section, fields, section_data if isinstance(section_data, dict) else {}),
+        reply_markup=config_edit_fields_kb(
+            section,
+            fields,
+            section_data if isinstance(section_data, dict) else {},
+            supports_reload=supports_reload,
+        ),
     )
 
 
@@ -2159,8 +2179,14 @@ def _parse_config_value(s: str):
 
 @router.callback_query(F.data.startswith("configedit:apply:"))
 async def cb_config_edit_apply(cq: CallbackQuery, config: Config):
-    """Применить все изменения секции."""
-    section = cq.data.split(":")[2]
+    """Применить все изменения секции, опционально с runtime reload."""
+    parts = cq.data.split(":")
+    # configedit:apply:{section} или configedit:apply:{mode}:{section}
+    if len(parts) == 4:
+        reload_mode, section = parts[2], parts[3]
+    else:
+        reload_mode, section = "", parts[2]
+
     uid = _uid(cq)
     cache = _config_edit_cache.get(uid, {})
     revision = cache.get("revision", "")
@@ -2170,10 +2196,12 @@ async def cb_config_edit_apply(cq: CallbackQuery, config: Config):
         await cq.answer("❌ Нет данных для применения", show_alert=True)
         return
 
-    # Применяем секцию целиком
+    # Применяем секцию целиком; reload делаем тем же запросом (единый If-Match)
     client, srv = await get_client(uid, config)
     try:
-        result = await client.patch_config({section: section_data}, if_match=revision)
+        result = await client.patch_config(
+            {section: section_data}, if_match=revision, reload=reload_mode
+        )
     except ApiError as e:
         await cq.answer(f"❌ {e}", show_alert=True)
         return
@@ -2182,17 +2210,72 @@ async def cb_config_edit_apply(cq: CallbackQuery, config: Config):
         return
 
     new_rev = result.get("revision", "")
-    restart = result.get("restart_required", False)
+    runtime_reload = result.get("runtime_reload_required", False)
+    # Старый API (3.4.16-3.4.24) отдаёт только легаси-поле restart_required
+    process_restart = result.get(
+        "process_restart_required", result.get("restart_required", False)
+    )
+    deferred = result.get("deferred_process_fields") or []
+    reload_info = result.get("reload") or {}
 
     text = f"✅ Секция <b>[{section}]</b> применена\n"
     if new_rev:
         text += f"revision: <code>{new_rev[:12]}…</code>\n"
-    if restart:
-        text += "\n⚠️ Требуется перезапуск Telemt!"
-    else:
-        text += "\n✅ Hot-reload"
+    if reload_info:
+        rid = reload_info.get("reload_id", "?")
+        state = reload_info.get("state", "?")
+        text += f"\n🔄 Reload <code>{reload_info.get('mode', reload_mode)}</code> принят (ID: <code>{rid}</code>, {state})\n"
+        text += f"Проверить: <code>/reload_status {rid}</code>\n"
+    elif runtime_reload:
+        text += "\n⚠️ Изменения требуют runtime reload — выберите режим ниже\n"
+    if process_restart:
+        text += "⛔ Нужен перезапуск процесса Telemt\n"
+    if deferred:
+        text += f"Отложено до перезапуска: <code>{', '.join(deferred)}</code>\n"
+    if not runtime_reload and not process_restart and not reload_info:
+        text += "✅ Hot-reload — перезапуск не требуется\n"
 
-    await _safe_edit(cq, text, reply_markup=config_edit_confirm_kb(section))
+    needs_reload = bool(runtime_reload) and not reload_info and not config.lite_mode
+    await _safe_edit(cq, text, reply_markup=config_edit_after_kb(section, needs_reload))
+
+
+@router.callback_query(F.data.startswith("configedit:reload:"))
+async def cb_config_edit_reload(cq: CallbackQuery, config: Config):
+    """Runtime reload после применения секции."""
+    if config.lite_mode:
+        await cq.answer("⛔ Отключено в lite-режиме", show_alert=True)
+        return
+
+    _, _, mode, section = cq.data.split(":")
+    if mode not in ("instant", "drain"):
+        await cq.answer("❌ Неверный режим", show_alert=True)
+        return
+
+    client, srv = await get_client(_uid(cq), config)
+    try:
+        result = await client.system_reload(mode=mode)
+    except ApiError as e:
+        await cq.answer(f"❌ {e.message}", show_alert=True)
+        return
+    except Exception as e:
+        await cq.answer(f"❌ {type(e).__name__}: {e}", show_alert=True)
+        return
+
+    reload_id = result.get("reload_id", "?")
+    state = result.get("state", "?")
+    icon = "✅" if state == "accepted" else "⚠️"
+    await cq.answer(
+        f"{icon} Reload {mode} принят (ID: {reload_id}, {state})",
+        show_alert=True,
+    )
+    text = (
+        f"{icon} <b>Runtime reload принят</b>\n\n"
+        f"ID: <code>{reload_id}</code>\n"
+        f"Режим: <code>{mode}</code>\n"
+        f"Статус: <code>{state}</code>\n\n"
+        f"Проверить: <code>/reload_status {reload_id}</code>"
+    )
+    await _safe_edit(cq, text, reply_markup=config_edit_after_kb(section, False))
 
 
 @router.callback_query(F.data.startswith("configedit:confirm:"))
@@ -2407,6 +2490,35 @@ async def cb_web_session_detail(cq: CallbackQuery, config: Config):
     )
 
 
+async def _poll_web_operation(
+    client, op_id: str, attempts: int = 6, delay: float = 1.0
+) -> dict:
+    """Поллит статус WEB-операции до терминального состояния или таймаута."""
+    last: dict = {}
+    for i in range(attempts):
+        try:
+            last = await client.get_web_operation(op_id)
+        except ApiError as e:
+            return {"state": "poll_error", "error": str(e)}
+        except Exception as e:
+            return {"state": "poll_error", "error": f"{type(e).__name__}: {e}"}
+        if last.get("state") not in ("queued", "running", None):
+            return last
+        if i < attempts - 1:
+            await asyncio.sleep(delay)
+    return last
+
+
+def _op_counters(op: dict) -> str:
+    """Счётчики WEB-операции. Имена полей подстраиваемся под оба варианта API."""
+    parts = []
+    for key in ("requested", "matched", "signalled", "conflicted", "scanned"):
+        val = op.get(key, op.get(f"{key}_total"))
+        if val is not None:
+            parts.append(f"{key}: {val}")
+    return ", ".join(parts)
+
+
 @router.callback_query(F.data.startswith("web:c:"))
 async def cb_web_close_session(cq: CallbackQuery, config: Config):
     """Закрыть WEB-сессию."""
@@ -2421,31 +2533,41 @@ async def cb_web_close_session(cq: CallbackQuery, config: Config):
     except Exception:
         runtime_instance = ""
 
-    # Восстанавливаем полный session_ref
-    session_ref = f"ws1.{runtime_instance}.{short_id}" if runtime_instance else short_id
-
-    # Получаем runtime_instance из статуса
-    try:
-        status = await client.get_web_status()
-        rt = status.get("runtime", {})
-        runtime_instance = rt.get("runtime_instance", "")
-    except Exception:
-        runtime_instance = ""
-
     if not runtime_instance:
         await cq.answer("❌ WEB runtime недоступен", show_alert=True)
         return
+
+    # Восстанавливаем полный session_ref
+    session_ref = f"ws1.{runtime_instance}.{short_id}" if runtime_instance else short_id
 
     try:
         result = await client.close_web_sessions(
             runtime_instance,
             {"kind": "refs", "session_refs": [session_ref]},
         )
-        op_id = result.get("operation_id", "?")
-        await cq.answer(f"✅ Запрос на закрытие (op: {op_id[:8]})", show_alert=True)
     except ApiError as e:
         await cq.answer(f"❌ {e.message}", show_alert=True)
         return
+
+    # Поллим статус операции до терминального состояния
+    op_id = result.get("operation_id", "")
+    final = await _poll_web_operation(client, op_id) if op_id else {"state": "unknown"}
+    state = final.get("state", "?")
+
+    if state == "completed":
+        counters = _op_counters(final)
+        msg = "✅ Сессия закрыта" + (f" ({counters})" if counters else "")
+    elif state == "failed":
+        reason = final.get("failure") or final.get("failure_token") or "ошибка операции"
+        msg = f"❌ Не удалось закрыть: {reason}"
+    elif state == "poll_error":
+        msg = f"⚠️ Запрос отправлен, но статус не получен: {final.get('error', '')}"
+    elif state in ("cancelled",):
+        msg = "⚠️ Операция отменена"
+    else:
+        msg = f"⏳ Операция ещё выполняется (state: {state})"
+
+    await cq.answer(msg, show_alert=True)
 
     # Возвращаемся к списку сессий
     await cb_web_sessions(cq, config)

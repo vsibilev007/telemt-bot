@@ -304,6 +304,7 @@ def alerts_kb(states: dict[str, bool] | None = None) -> InlineKeyboardMarkup:
     labels = {
         "status_down":      "Падение сервера",
         "status_up":        "Восстановление",
+        "not_ready":        "Готовность (admission/upstreams)",
         "conn_spike":       "Всплеск соединений",
         "writers_low":      "Writers coverage",
         "version_change":   "Обновление версии",
@@ -429,7 +430,9 @@ def config_edit_sections_kb(telemt_version: str = "") -> InlineKeyboardMarkup:
     return kb.as_markup()
 
 
-def config_edit_fields_kb(section: str, fields: list[str], current: dict) -> InlineKeyboardMarkup:
+def config_edit_fields_kb(
+    section: str, fields: list[str], current: dict, supports_reload: bool = True
+) -> InlineKeyboardMarkup:
     """Кнопки полей секции с текущими значениями."""
     kb = InlineKeyboardBuilder()
     for field in fields:
@@ -447,18 +450,27 @@ def config_edit_fields_kb(section: str, fields: list[str], current: dict) -> Inl
             label = label[:37] + "..."
         kb.button(text=label, callback_data=f"configedit:field:{section}:{field}")
     kb.button(text="💾 Применить", callback_data=f"configedit:apply:{section}")
+    if supports_reload:
+        kb.button(text="⚡ +instant", callback_data=f"configedit:apply:instant:{section}")
+        kb.button(text="🌙 +drain",   callback_data=f"configedit:apply:drain:{section}")
     kb.button(text="◀️ Назад",     callback_data="configedit:menu")
     kb.button(text="◀️ Меню",      callback_data="menu:main")
     n = len(fields)
-    kb.adjust(*([1] * n) + [2, 1])
+    if supports_reload:
+        kb.adjust(*([1] * n) + [3, 2])
+    else:
+        kb.adjust(*([1] * n) + [1, 2])
     return kb.as_markup()
 
 
-def config_edit_confirm_kb(section: str) -> InlineKeyboardMarkup:
+def config_edit_after_kb(section: str, needs_reload: bool = False) -> InlineKeyboardMarkup:
+    """Клавиатура после применения секции: предлагает reload, если он нужен."""
     kb = InlineKeyboardBuilder()
-    kb.button(text="✅ Да, применить", callback_data=f"configedit:confirm:{section}")
-    kb.button(text="❌ Отмена",        callback_data=f"configedit:section:{section}")
-    kb.adjust(2)
+    if needs_reload:
+        kb.button(text="⚡ Reload instant", callback_data=f"configedit:reload:instant:{section}")
+        kb.button(text="🌙 Reload drain",   callback_data=f"configedit:reload:drain:{section}")
+        kb.adjust(2)
+    kb.button(text="◀️ К секции", callback_data=f"configedit:confirm:{section}")
     return kb.as_markup()
 
 
