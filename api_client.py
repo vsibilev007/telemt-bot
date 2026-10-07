@@ -18,11 +18,35 @@ TIMEOUT = aiohttp.ClientTimeout(total=10, connect=3)
 # Ограничение параллельных запросов к одному инстансу API
 _semaphores: dict[str, asyncio.Semaphore] = {}
 
+# Пул keep-alive сессий: одна на инстанс API вместо новой на каждый запрос
+# (иначе каждый вызов платит TCP+TLS handshake). Клиенты TelemetClient
+# создаются на каждый вызов хендлера, поэтому кэшируем глобально по base_url.
+_sessions: dict[str, aiohttp.ClientSession] = {}
+
 
 def _get_semaphore(base_url: str) -> asyncio.Semaphore:
     if base_url not in _semaphores:
         _semaphores[base_url] = asyncio.Semaphore(5)
     return _semaphores[base_url]
+
+
+def _get_session(base_url: str) -> aiohttp.ClientSession:
+    session = _sessions.get(base_url)
+    if session is None or session.closed:
+        session = aiohttp.ClientSession(timeout=TIMEOUT)
+        _sessions[base_url] = session
+    return session
+
+
+async def close_http_sessions():
+    """Закрывает все кэшированные сессии — вызывать при остановке бота."""
+    for base_url, session in _sessions.items():
+        if not session.closed:
+            try:
+                await session.close()
+            except Exception as e:
+                logger.warning("Не удалось закрыть сессию [%s]: %s", base_url, e)
+    _sessions.clear()
 
 
 class ApiError(Exception):
@@ -57,9 +81,12 @@ class TelemetClient:
             headers["If-Match"] = if_match
 
         sem = _get_semaphore(self.base_url)
+        session = _get_session(self.base_url)
         async with sem:
-            try:
-                async with aiohttp.ClientSession(timeout=TIMEOUT) as session:
+            # Keep-alive соединение могло быть закрыто сервером между запросами —
+            # один ретрай устанавливает свежее соединение.
+            for attempt in (1, 2):
+                try:
                     async with session.request(
                         method, url, headers=headers, json=json
                     ) as resp:
@@ -72,10 +99,15 @@ class TelemetClient:
                                 status=resp.status,
                             )
                         return data.get("data", {})
-            except aiohttp.ServerTimeoutError:
-                raise ApiError("timeout", "Нет ответа от API за 10с", status=0)
-            except aiohttp.ClientConnectorError as e:
-                raise ApiError("unreachable", f"Не удалось подключиться: {e}", status=0)
+                except aiohttp.ServerTimeoutError:
+                    raise ApiError("timeout", "Нет ответа от API за 10с", status=0)
+                except aiohttp.ServerDisconnectedError:
+                    if attempt == 2:
+                        raise ApiError(
+                            "unreachable", "Сервер разорвал соединение", status=0
+                        )
+                except aiohttp.ClientConnectorError as e:
+                    raise ApiError("unreachable", f"Не удалось подключиться: {e}", status=0)
 
     # ─── Endpoints ───────────────────────────────────────────────────────────
 

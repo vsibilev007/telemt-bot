@@ -16,6 +16,7 @@ from aiogram.types import (
     MenuButtonCommands,
 )
 
+from api_client import close_http_sessions
 from config import load_config
 from handlers import router
 from logging_setup import setup_logging
@@ -92,6 +93,7 @@ async def main():
     finally:
         sched.stop()
         await bot.session.close()
+        await close_http_sessions()
         logger.info("Бот остановлен")
 
 
