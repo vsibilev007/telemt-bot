@@ -1211,7 +1211,9 @@ def format_web_sessions(data: dict) -> str:
 
     for s in sessions[:20]:
         ref = s.get("session_ref", "?")
-        short_ref = ref.split(".")[-1][:8] if "." in ref else ref[:8]
+        # ID сессии — счётчик u64 в 16-hex с ведущими нулями (0000000000000001…),
+        # поэтому показываем последние 8 символов: первые 8 у всех долгое время нули
+        short_ref = ref.split(".")[-1][-8:] if "." in ref else ref[-8:]
         user = s.get("user", "?")
         ip = s.get("client_ip", s.get("ip", "?"))
         carrier = s.get("carrier", "?")
@@ -1259,7 +1261,6 @@ def format_web_session_detail(d: dict) -> str:
     idle_ms = d.get("idle_ms", 0)
     age_s = age_ms // 1000 if age_ms else d.get("age_secs", 0)
     idle_s = idle_ms // 1000 if idle_ms else d.get("idle_secs", 0)
-    idle_s = d.get("idle_secs", 0)
     pending = d.get("pending_bytes", 0)
     control = d.get("control_bytes", 0)
     ua = d.get("user_agent", "")

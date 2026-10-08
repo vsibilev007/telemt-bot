@@ -521,7 +521,8 @@ def web_sessions_kb(sessions: list, has_next: bool = False, next_cursor: str = "
         state = s.get("state", "?")
         icon = {"healthy": "🟢", "committed": "🔵", "provisional": "🟡",
                 "closing": "🔴"}.get(state, "⚪")
-        kb.button(text=f"{icon} {user} ({short_id[:8]})", callback_data=f"web:s:{short_id}")
+        # Подпись — последние 8 hex: ID это zero-padded счётчик, первые 8 — нули
+        kb.button(text=f"{icon} {user} ({short_id[-8:]})", callback_data=f"web:s:{short_id}")
     if has_next and next_cursor:
         # Сокращаем cursor до 32 символов
         kb.button(text="▶️ Ещё", callback_data=f"web:n:{next_cursor[:32]}")
