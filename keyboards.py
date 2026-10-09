@@ -116,7 +116,9 @@ def dashboard_kb() -> InlineKeyboardMarkup:
 def users_list_kb(
     users: list, page: int = 0, page_size: int = 10,
     config=None, cluster: bool = False,
+    sel_mode: bool = False, selected: set | None = None,
 ) -> InlineKeyboardMarkup:
+    selected = selected or set()
     kb = InlineKeyboardBuilder()
 
     start = page * page_size
@@ -148,10 +150,17 @@ def users_list_kb(
         # enabled=False — явно отключён (3.4.14+); None — поле отсутствует (старый API)
         disabled_tag = " 🔴" if u.get("enabled") is False else ""
 
-        kb.button(
-            text=f"{icon} {name}  |  {traffic}  |  {conns}🔌{ip_tag}{node_tag}{disabled_tag}",
-            callback_data=f"user:view:{name}",
-        )
+        if sel_mode:
+            mark = "☑️" if name in selected else "⬜"
+            kb.button(
+                text=f"{mark} {name}  |  {traffic}  |  {conns}🔌{ip_tag}{disabled_tag}",
+                callback_data=f"user:sel:{name}",
+            )
+        else:
+            kb.button(
+                text=f"{icon} {name}  |  {traffic}  |  {conns}🔌{ip_tag}{node_tag}{disabled_tag}",
+                callback_data=f"user:view:{name}",
+            )
 
     total_pages = max(1, -(-len(users) // page_size))
     nav_count = 0
@@ -165,17 +174,40 @@ def users_list_kb(
             kb.button(text="▶", callback_data=f"users:page:{page + 1}")
             nav_count += 1
 
+    if sel_mode:
+        n = len(selected)
+        kb.button(text=f"🔴 Откл ({n})",     callback_data="users:sel_do:disable")
+        kb.button(text=f"✅ Вкл ({n})",      callback_data="users:sel_do:enable")
+        kb.button(text=f"🗑 Удалить ({n})",  callback_data="users:sel_del:0")
+        kb.button(text="✔ Готово",           callback_data=f"users:sel_exit:{page}")
+        schema = [1] * len(page_users)
+        if nav_count:
+            schema.append(nav_count)
+        schema += [2, 1, 1]
+        kb.adjust(*schema)
+        return kb.as_markup()
+
     kb.button(text="➕ Новый",        callback_data="user:create")
+    kb.button(text="➕➕ Массово",    callback_data="user:bulk")
     kb.button(text="🔍 Поиск",       callback_data="users:search")
     kb.button(text="🔄 Обновить",    callback_data="users:refresh")
+    kb.button(text="☑️ Выбрать",     callback_data=f"users:sel_enter:{page}")
     kb.button(text="⚙️ Ещё",         callback_data="users:extra")
     kb.button(text="◀ Назад в меню", callback_data="menu:main")
 
     schema = [1] * len(page_users)
     if nav_count:
         schema.append(nav_count)
-    schema += [2, 2, 1]
+    schema += [3, 2, 2]
     kb.adjust(*schema)
+    return kb.as_markup()
+
+
+def users_sel_delete_confirm_kb(count: int) -> InlineKeyboardMarkup:
+    kb = InlineKeyboardBuilder()
+    kb.button(text=f"🗑 Да, удалить ({count})", callback_data="users:sel_del:1")
+    kb.button(text="◀ Отмена", callback_data="users:sel_back:0")
+    kb.adjust(2)
     return kb.as_markup()
 
 

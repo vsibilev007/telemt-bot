@@ -44,16 +44,18 @@ from keyboards import (
     sysinfo_kb, traffic_period_kb, traffic_report_kb, upstreams_kb,
     proxy_check_kb,
     config_edit_sections_kb, config_edit_fields_kb, config_edit_after_kb, user_delete_confirm_kb, user_detail_kb, user_edit_kb,
+    users_sel_delete_confirm_kb,
     user_links_kb, users_active_ips_kb, users_delete_expired_confirm_kb,
     users_extra_kb, users_list_kb,
     web_menu_kb, web_sessions_kb, web_session_detail_kb,
 )
+from aiogram.utils.keyboard import InlineKeyboardBuilder
 from session import get_client, get_server_index, set_server_index
 from sysinfo import get_system_info, format_system_status
 import charts
 import proxy_checker as pc
 from proxy_checker import format_node_result
-from states import CreateUserFSM, EditFieldFSM, SearchUserFSM, ProxyCheckFSM, NodeCheckFSM, ConfigEditFSM
+from states import CreateUserFSM, BulkCreateFSM, EditFieldFSM, SearchUserFSM, ProxyCheckFSM, NodeCheckFSM, ConfigEditFSM
 from export_toml import router as export_toml_router
 from database import set_alert, get_alert
 
@@ -533,12 +535,212 @@ async def cb_users_page(cq: CallbackQuery, config: Config):
     except (ValueError, IndexError):
         await cq.answer("❌ Неверная страница", show_alert=True)
         return
+    # В режиме выбора листаем сохранённый список, не запрашивая API заново
+    if _uid(cq) in _users_selection:
+        await _show_users_sel(cq, config, max(0, page))
+        return
     await _show_users(cq, config, max(0, page))
 
 
 @router.callback_query(F.data == "users:refresh")
 async def cb_users_refresh(cq: CallbackQuery, config: Config):
+    # «Обновить» сбрасывает режим выбора и перезагружает данные
+    _users_selection.pop(_uid(cq), None)
     await _show_users(cq, config, 0)
+
+
+# ─── Массовый выбор юзеров (чекбоксы) ─────────────────────────────────────────
+
+# Хранилище режима выбора: uid → {"users", "selected", "page", "cluster"}
+_users_selection: dict[int, dict] = {}
+
+
+def _sel_names(selected: set) -> str:
+    names = sorted(selected)
+    shown = ", ".join(f"<code>{n}</code>" for n in names[:15])
+    return shown + (f" …ещё {len(names) - 15}" if len(names) > 15 else "")
+
+
+async def _show_users_sel(cq: CallbackQuery, config: Config, page: int = 0):
+    """Перерисовывает список в режиме выбора (без повторного запроса к API)."""
+    st = _users_selection.get(_uid(cq))
+    if not st:
+        await _show_users(cq, config, 0)
+        return
+    st["page"] = page
+    header = (
+        f"<b>☑️ Выбрано {len(st['selected'])}</b> из {len(st['users'])}\n"
+        f"Отмечено: {_sel_names(st['selected']) or '—'}"
+    )
+    await _safe_edit(
+        cq, header,
+        reply_markup=users_list_kb(
+            st["users"], page, cluster=st["cluster"],
+            sel_mode=True, selected=st["selected"],
+        ),
+    )
+
+
+async def _fetch_users(uid: int, config: Config):
+    """(users, srv, members) или (None, srv, members) при ошибке API."""
+    client, srv = await get_client(uid, config)
+    members = config.get_group_members(srv)
+    try:
+        if config.is_cluster(srv):
+            users = await cluster_users_with_nodes(members)
+        else:
+            users = await client.get_users()
+    except ApiError as e:
+        await cq_safe_error(e)
+        return None, srv, members
+    return users, srv, members
+
+
+async def cq_safe_error(e: ApiError):
+    """Заглушка-логгер для ошибок API вне _api_call."""
+    logger.warning("users fetch failed: %s", e)
+
+
+@router.callback_query(F.data.startswith("users:sel_enter:"))
+async def cb_users_sel_enter(cq: CallbackQuery, config: Config):
+    """Вход в режим выбора: загружаем список и запоминаем выбор."""
+    users, srv, members = await _fetch_users(_uid(cq), config)
+    if users is None:
+        await cq.answer("❌ Не удалось получить список", show_alert=True)
+        return
+    try:
+        page = max(0, int(cq.data.split(":")[-1]))
+    except ValueError:
+        page = 0
+    _users_selection[_uid(cq)] = {
+        "users": users, "selected": set(), "page": page,
+        "cluster": config.is_cluster(srv),
+    }
+    await _show_users_sel(cq, config, page)
+
+
+@router.callback_query(F.data.startswith("users:sel_exit:"))
+async def cb_users_sel_exit(cq: CallbackQuery, config: Config):
+    _users_selection.pop(_uid(cq), None)
+    await _show_users(cq, config, 0)
+
+
+@router.callback_query(F.data.startswith("users:sel_back:"))
+async def cb_users_sel_back(cq: CallbackQuery, config: Config):
+    st = _users_selection.get(_uid(cq))
+    await _show_users_sel(cq, config, st["page"] if st else 0)
+
+
+@router.callback_query(F.data.startswith("user:sel:"))
+async def cb_user_sel_toggle(cq: CallbackQuery, config: Config):
+    """Отметить/снять юзера в режиме выбора."""
+    name = cq.data.split(":", 2)[2]
+    st = _users_selection.get(_uid(cq))
+    if not st:
+        await _show_users(cq, config, 0)
+        return
+    if name in st["selected"]:
+        st["selected"].discard(name)
+    else:
+        st["selected"].add(name)
+    await _show_users_sel(cq, config, st["page"])
+
+
+async def _send_fresh_users_list(cq: CallbackQuery, config: Config):
+    """После массовой операции: новый список отдельным сообщением."""
+    users, _, _ = await _fetch_users(_uid(cq), config)
+    if users is None:
+        return
+    active = sum(1 for u in users if u.get("current_connections", 0) > 0)
+    await cq.message.answer(
+        f"<b>👥 Клиенты</b>  {active} онлайн / {len(users)} всего",
+        reply_markup=users_list_kb(users, 0, config=config),
+    )
+
+
+@router.callback_query(F.data.startswith("users:sel_do:"))
+async def cb_users_sel_do(cq: CallbackQuery, config: Config):
+    """Массовое включение/отключение выбранных."""
+    action = cq.data.split(":")[-1]
+    st = _users_selection.get(_uid(cq))
+    if not st or not st["selected"]:
+        await cq.answer("❌ Никто не выбран", show_alert=True)
+        return
+    names = sorted(st["selected"])
+    _, srv, members = await _fetch_users(_uid(cq), config)
+
+    method = "enable_user" if action == "enable" else "disable_user"
+    await cq.answer(f"⏳ {action}: {len(names)} юзеров…")
+
+    # Последовательно: API сервера сериализует мутации одним локом
+    report: list[str] = []
+    failed = 0
+    for name in names:
+        results = await cluster_write(members, method, name)
+        if _all_ok(results):
+            report.append(f"✅ {name}")
+        else:
+            failed += 1
+            report.append(f"❌ {name}: {_format_cluster_result([r for r in results if not r.ok])[:120]}")
+
+    icon = "🟢" if action == "enable" else "🔴"
+    verb = "Включены" if action == "enable" else "Отключены"
+    text = f"{icon} <b>{verb}: {len(names) - failed} из {len(names)}</b>\n\n"
+    text += "\n".join(report[:30]) + (f"\n…ещё {len(report) - 30}" if len(report) > 30 else "")
+
+    _users_selection.pop(_uid(cq), None)
+    await _safe_edit(cq, text)
+    await _send_fresh_users_list(cq, config)
+
+
+@router.callback_query(F.data.startswith("users:sel_del:"))
+async def cb_users_sel_del(cq: CallbackQuery, config: Config):
+    """Удаление выбранных: 0 — подтверждение, 1 — исполнение."""
+    stage = cq.data.split(":")[-1]
+    st = _users_selection.get(_uid(cq))
+    if not st or not st["selected"]:
+        await cq.answer("❌ Никто не выбран", show_alert=True)
+        return
+
+    if stage != "1":
+        await _safe_edit(
+            cq,
+            f"⚠️ <b>Удалить {len(st['selected'])} юзеров?</b>\n\n"
+            f"{_sel_names(st['selected'])}\n\n"
+            "Действие необратимо. WEB-профили будут сняты автоматически.",
+            reply_markup=users_sel_delete_confirm_kb(len(st["selected"])),
+        )
+        return
+
+    names = sorted(st["selected"])
+    await cq.answer(f"⏳ Удаляю {len(names)}…")
+    _, srv, members = await _fetch_users(_uid(cq), config)
+
+    # Сначала снимаем WEB-профили на всех узлах (иначе API отклонит удаление)
+    for node in members:
+        try:
+            await _strip_web_profiles(TelemetClient(node.url, node.auth_header), st["selected"])
+        except Exception as e:
+            logger.warning("WEB profile strip failed on %s: %s", node.name, e)
+
+    report: list[str] = []
+    failed = 0
+    for name in names:
+        results = await cluster_write(members, "delete_user", name)
+        if _all_ok(results):
+            report.append(f"🗑 {name}")
+        else:
+            failed += 1
+            report.append(f"❌ {name}: {_format_cluster_result([r for r in results if not r.ok])[:120]}")
+
+    text = f"🗑 <b>Удалены: {len(names) - failed} из {len(names)}</b>\n\n"
+    text += "\n".join(report[:30]) + (f"\n…ещё {len(report) - 30}" if len(report) > 30 else "")
+    if failed:
+        text += f"\n\n⚠️ Не удалены: {failed} (последний юзер или висящий профиль)"
+
+    _users_selection.pop(_uid(cq), None)
+    await _safe_edit(cq, text)
+    await _send_fresh_users_list(cq, config)
 
 
 # ─── Users extra ──────────────────────────────────────────────────────────────
@@ -698,6 +900,185 @@ async def cb_delete_expired_confirm(cq: CallbackQuery, config: Config):
         f"⚠️ Удалить <b>{len(expired)}</b> истёкших?\n\n<code>{names}</code>",
         reply_markup=users_delete_expired_confirm_kb(),
     )
+
+
+# ─── Массовое создание юзеров ─────────────────────────────────────────────────
+
+# Лимит имени для bulk: имя попадает в callback "user:links:{name}" (64 байта)
+BULK_NAME_MAX = 40
+BULK_MAX_COUNT = 50
+BULK_SPEC_HELP = (
+    "Отправь параметры одной строкой:\n"
+    "<code>шаблон количество дней [квота_GB]</code>\n\n"
+    "Примеры:\n"
+    "• <code>guest 5 30</code> → guest1…guest5 на 30 дней\n"
+    "• <code>vpn{n} 3 7 50</code> → vpn1…vpn3 на 7 дней, квота 50 ГБ\n"
+    "• <code>guest 10 0</code> → 10 юзеров без срока\n\n"
+    f"Количество: 1–{BULK_MAX_COUNT}, длина имени ≤ {BULK_NAME_MAX}."
+)
+
+
+def _bulk_names(template: str, count: int) -> list[str]:
+    """guest → guest1..guestN; vpn{n} → vpn1..vpnN."""
+    if "{n}" in template:
+        return [template.replace("{n}", str(i)) for i in range(1, count + 1)]
+    return [f"{template}{i}" for i in range(1, count + 1)]
+
+
+def _parse_bulk_spec(text: str) -> tuple[list[str], int, int]:
+    """Разбирает 'шаблон N дней [квота_GB]'. Бросает ValueError с текстом ошибки."""
+    parts = text.split()
+    if len(parts) < 3 or len(parts) > 4:
+        raise ValueError("Нужно 3–4 параметра: шаблон количество дней [квота_GB]")
+
+    template, cnt_raw, days_raw = parts[0], parts[1], parts[2]
+    quota_raw = parts[3] if len(parts) == 4 else "0"
+
+    try:
+        count = int(cnt_raw)
+        days = int(days_raw)
+        quota_gb = int(quota_raw)
+    except ValueError:
+        raise ValueError("Количество, дни и квота должны быть целыми числами")
+
+    if not 1 <= count <= BULK_MAX_COUNT:
+        raise ValueError(f"Количество: 1–{BULK_MAX_COUNT}")
+    if not 0 <= days <= 3650:
+        raise ValueError("Дни: 0 (без срока) … 3650")
+    if not 0 <= quota_gb <= 1024:
+        raise ValueError("Квота в ГБ: 0 (без квоты) … 1024")
+
+    names = _bulk_names(template, count)
+    for name in names:
+        if not USERNAME_RE.match(name):
+            raise ValueError(
+                f"Имя <code>{name}</code> не подходит: латиница/цифры/._- , 1–64 символа"
+            )
+        if len(name) > BULK_NAME_MAX:
+            raise ValueError(
+                f"Имя <code>{name}</code> длиннее {BULK_NAME_MAX} символов — укоротите шаблон"
+            )
+    return names, days, quota_gb
+
+
+@router.callback_query(F.data == "user:bulk")
+async def cb_user_bulk(cq: CallbackQuery, state: FSMContext):
+    await state.set_state(BulkCreateFSM.waiting_spec)
+    await _safe_edit(
+        cq,
+        "<b>➕➕ Массовое создание клиентов</b>\n\n" + BULK_SPEC_HELP,
+        reply_markup=InlineKeyboardBuilder().button(
+            text="◀ Отмена", callback_data="menu:users"
+        ).adjust(1).as_markup(),
+    )
+
+
+@router.message(BulkCreateFSM.waiting_spec, F.text)
+async def fsm_bulk_spec(message: Message, state: FSMContext, config: Config):
+    if message.text.startswith("/"):
+        await state.clear()
+        await message.answer("❌ Отменено")
+        return
+
+    try:
+        names, days, quota_gb = _parse_bulk_spec(message.text or "")
+    except ValueError as e:
+        await message.answer(f"❌ {e}\n\n{BULK_SPEC_HELP}")
+        return
+
+    await state.clear()
+    uid = _uid(message)
+    client, srv = await get_client(uid, config)
+    members = config.get_group_members(srv)
+
+    # Предзагрузка существующих: лишние 409 не шлём
+    try:
+        existing = {u["username"] for u in await client.get_users()}
+    except Exception:
+        existing = set()
+
+    status = await message.answer(f"⏳ Создаю {len(names)} юзеров…")
+
+    created: list[str] = []
+    skipped: list[str] = []
+    failed: list[tuple[str, str]] = []
+    created_users: dict[str, dict] = {}
+
+    for name in names:
+        if name in existing:
+            skipped.append(name)
+            continue
+        payload: dict = {"username": name}
+        if days:
+            payload["expiration_rfc3339"] = (
+                datetime.now(timezone.utc) + timedelta(days=days)
+            ).strftime("%Y-%m-%dT%H:%M:%SZ")
+        if quota_gb:
+            payload["data_quota_bytes"] = quota_gb * (1 << 30)
+
+        results = await cluster_write(members, "create_user", payload)
+        ok_results = [r for r in results if r.ok]
+        if ok_results:
+            created.append(name)
+            user = ok_results[0].data
+            created_users[name] = user.get("user", user)
+        else:
+            err = next((r for r in results if not r.ok), None)
+            failed.append((name, err.error if err else "unknown"))
+
+    # WEB-профили: один PATCH на всю пачку (vhosts — массив, заменяется целиком)
+    web_warn = ""
+    if created:
+        try:
+            cfg = await client.get_config()
+            vhosts = (cfg.get("web") or {}).get("vhosts") or []
+            if vhosts:
+                vhost = dict(vhosts[0])
+                profiles = vhost.get("profiles") or []
+                have = {p.get("user") for p in profiles}
+                for name in created:
+                    if name not in have:
+                        profiles.append({
+                            "user": name,
+                            "secret_mode": "dd",
+                            "max_sessions": 8,
+                            "max_streams": 512,
+                            "max_streams_per_session": 64,
+                        })
+                vhost["profiles"] = profiles
+                await client.patch_config(
+                    {"web": {"vhosts": [vhost]}},
+                    if_match=cfg.get("revision", ""),
+                    reload="instant",
+                )
+        except Exception as e:
+            web_warn = f"\n⚠️ WEB-профили не добавлены: {e}"
+
+    lines = [f"<b>➕➕ Массовое создание: готово</b>\n"]
+    if created:
+        lines.append(f"✅ Создано: {len(created)}")
+    if skipped:
+        lines.append(f"⏭ Уже существуют: {', '.join(skipped[:10])}"
+                     + (f" …ещё {len(skipped) - 10}" if len(skipped) > 10 else ""))
+    for name, err in failed[:10]:
+        lines.append(f"❌ {name}: {err}")
+    if len(failed) > 10:
+        lines.append(f"…ещё ошибок: {len(failed) - 10}")
+    if days:
+        lines.append(f"📅 Срок: {days} дней")
+    if quota_gb:
+        lines.append(f"💾 Квота: {quota_gb} ГБ на юзера")
+    lines.append(web_warn)
+
+    kb = InlineKeyboardBuilder()
+    for name in created[:8]:
+        kb.button(text=f"🔗 {name}", callback_data=f"user:links:{name}")
+    if len(created) > 8:
+        lines.append(f"\n<i>Ссылки остальных — через 🔍 Поиск.</i>")
+    kb.button(text="👥 К списку", callback_data="menu:users")
+    kb.adjust(2 if created else 1)
+
+    await status.edit_text("\n".join(lines), reply_markup=kb.as_markup())
 
 
 def _parse_exp(exp: str):

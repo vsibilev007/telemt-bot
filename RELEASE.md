@@ -1,5 +1,13 @@
 # Release Notes
 
+## Bulk User Operations
+
+- **Multi-select mode** — "☑️ Выбрать" in the users list turns rows into checkboxes (paged, no refetch on toggle); "🔴 Откл / ✅ Вкл / 🗑 Удалить" apply to all selected users with per-user cluster results
+- **Bulk delete** — confirmation screen; WEB profiles are stripped from every cluster node before DELETE (the API rejects users referenced by a WEB profile)
+- **Bulk create** — "➕➕ Массово" button: one-line spec `template count days [quota_GB]` (e.g. `guest 10 30`, `vpn{n} 3 7 50`) creates numbered users with expiration/quota; existing names are skipped, not failed
+- All WEB profiles for a bulk batch are added in a single `PATCH /v1/config?reload=instant` instead of one patch per user
+- Names are limited to 40 chars so `user:links:` callbacks stay under Telegram's 64-byte limit
+
 ## Config Editor Reload
 
 - **Apply + reload in one request** — "⚡ +instant" / "🌙 +drain" buttons next to "Применить" (PATCH /v1/config?reload=..., single If-Match revision)
