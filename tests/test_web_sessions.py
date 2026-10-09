@@ -77,9 +77,10 @@ class TestSessionDetail:
         assert "Age: 1д 15ч 29м 12с" in text
 
     def test_list_age_human_readable(self):
-        # Регрессия: age=2369м в списке
+        # Регрессия: age=1754м в списке → 105240с = 1д 5ч 14м 0с
         text = format_web_sessions({"sessions": [_session(1)], "total": 1})
-        assert "age=1д 15ч 29м 12с" in text
+        assert "age=1д 5ч 14м 0с" in text
+        assert "age=1754м" not in text
 
     def test_ua_not_truncated(self):
         text = format_web_session_detail(self._detail())
