@@ -1,6 +1,6 @@
-"""Тесты отображения WEB-сессий: короткий ID и кнопки."""
+"""Тесты отображения WEB-сессий: короткий ID, кнопки, карточка сессии."""
 
-from formatters import format_web_sessions
+from formatters import format_web_session_detail, format_web_sessions
 from keyboards import web_sessions_kb
 
 
@@ -41,3 +41,69 @@ class TestShortSessionId:
         # Регрессия: idle_s из idle_ms перетирался d.get("idle_secs", 0)
         text = format_web_sessions({"sessions": [_session(1)], "total": 1})
         assert "idle=3с" in text
+
+
+class TestSessionDetail:
+    LONG_UA = (
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+        "(KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36"
+    )
+
+    def _detail(self) -> dict:
+        d = _session(1, "Alena")
+        d.update(
+            host="list.lympik.ru",
+            attempt=3,
+            client_class="browser",
+            automatic=True,
+            health_publication="published",
+            websocket_active=False,
+            pending_bytes=0,
+            control_bytes=0,
+            age_ms=2369 * 60 * 1000 + 12_000,  # «2369м 12с» из багрепорта
+            idle_ms=500,
+            peer_idle_ms=1500,
+            reconnect_grace_ms=90_000,
+            peer_deadline_remaining_ms=60_000,
+            user_agent=self.LONG_UA,
+            key_id="7a75a79bfedac30d",
+            negotiation_remaining_ms=12_000,
+        )
+        return d
+
+    def test_age_human_readable(self):
+        # Регрессия: Age: 2369м 12с → 142152с = 1д 15ч 29м 12с
+        text = format_web_session_detail(self._detail())
+        assert "Age: 1д 15ч 29м 12с" in text
+
+    def test_list_age_human_readable(self):
+        # Регрессия: age=2369м в списке
+        text = format_web_sessions({"sessions": [_session(1)], "total": 1})
+        assert "age=1д 15ч 29м 12с" in text
+
+    def test_ua_not_truncated(self):
+        text = format_web_session_detail(self._detail())
+        assert self.LONG_UA in text
+        assert "…" not in text
+
+    def test_negotiation_field_name(self):
+        # Регрессия: читалось несуществующее negotiation_time_remaining_secs
+        text = format_web_session_detail(self._detail())
+        assert "Negotiation left: 12с" in text
+
+    def test_new_fields_shown(self):
+        text = format_web_session_detail(self._detail())
+        assert "health: published" in text
+        assert "Class: browser" in text
+        assert "(auto)" in text
+        assert "Peer idle: 1с" in text
+        assert "Reconnect grace: 1м 30с" in text
+        assert "Peer deadline: 1м" in text
+
+    def test_websocket_active_bool(self):
+        # websocket_active в API — булево, а не счётчик
+        d = self._detail()
+        d["websocket_active"] = True
+        text = format_web_session_detail(d)
+        assert "WebSocket: активен" in text
+        assert "WebSocket connections: True" not in text

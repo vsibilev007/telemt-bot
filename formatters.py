@@ -1226,8 +1226,8 @@ def format_web_sessions(data: dict) -> str:
 
         state_icon = _STATE_ICONS.get(state, "❓")
         carrier_label = _CARRIER_LABELS.get(carrier, carrier)
-        age_str = f"{age_s // 60}м" if age_s >= 60 else f"{age_s}с"
-        idle_str = f"{idle_s // 60}м" if idle_s >= 60 else f"{idle_s}с"
+        age_str = fmt_uptime(age_s)
+        idle_str = fmt_uptime(idle_s)
 
         lines.append(
             f"{state_icon} <code>{short_ref}</code>  "
@@ -1256,9 +1256,13 @@ def format_web_session_detail(d: dict) -> str:
     streams = d.get("streams", d.get("active_streams", 0))
     tasks = d.get("tasks", d.get("active_tasks", 0))
     lanes = d.get("lanes", d.get("active_lanes", 0))
-    ws_conns = d.get("websocket_active", d.get("active_websocket_connections", 0))
+    ws_active = d.get("websocket_active", False)
+    ws_conns = d.get("active_websocket_connections")
     age_ms = d.get("age_ms", 0)
     idle_ms = d.get("idle_ms", 0)
+    peer_idle_ms = d.get("peer_idle_ms", 0)
+    grace_ms = d.get("reconnect_grace_ms", 0)
+    deadline_ms = d.get("peer_deadline_remaining_ms", 0)
     age_s = age_ms // 1000 if age_ms else d.get("age_secs", 0)
     idle_s = idle_ms // 1000 if idle_ms else d.get("idle_secs", 0)
     pending = d.get("pending_bytes", 0)
@@ -1266,7 +1270,10 @@ def format_web_session_detail(d: dict) -> str:
     ua = d.get("user_agent", "")
     key_id = d.get("key_id", "")
     attempt = d.get("attempt", "")
-    negotiation_left = d.get("negotiation_time_remaining_secs")
+    client_class = d.get("client_class", "")
+    automatic = d.get("automatic")
+    health = d.get("health_publication", "")
+    negotiation_ms = d.get("negotiation_remaining_ms")
 
     state_icon = _STATE_ICONS.get(state, "❓")
     carrier_label = _CARRIER_LABELS.get(carrier, carrier)
@@ -1274,30 +1281,42 @@ def format_web_session_detail(d: dict) -> str:
     lines = [
         f"<b>🌐 WEB Session</b>",
         f"Ref: <code>{ref}</code>",
-        f"{state_icon} State: <b>{state}</b>",
+        f"{state_icon} State: <b>{state}</b>" + (f" | health: {health}" if health else ""),
         "",
         f"👤 User: <b>{user}</b>",
         f"📍 IP: <code>{ip}</code>",
         f"🏷 Host: <code>{host}</code>",
-        f"🔗 Carrier: <b>{carrier_label}</b>",
+        f"🔗 Carrier: <b>{carrier_label}</b>" + (" (auto)" if automatic else ""),
     ]
     if attempt:
-        lines.append(f"Attempt: {attempt}")
+        attempt_line = f"Attempt: {attempt}"
+        if client_class:
+            attempt_line += f" | Class: {client_class}"
+        lines.append(attempt_line)
 
     lines.append("")
     lines.append(f"Streams: {streams} | Tasks: {tasks} | Lanes: {lanes}")
     if ws_conns:
         lines.append(f"WebSocket connections: {ws_conns}")
+    elif ws_active:
+        lines.append("WebSocket: активен")
     lines.append(f"Pending: {fmt_bytes(pending)} | Control: {fmt_bytes(control)}")
-    lines.append(f"Age: {age_s // 60}м {age_s % 60}с | Idle: {idle_s}с")
+    lines.append(
+        f"Age: {fmt_uptime(age_s)} | Idle: {fmt_uptime(idle_s)} | "
+        f"Peer idle: {fmt_uptime(peer_idle_ms // 1000)}"
+    )
+    if grace_ms:
+        lines.append(f"Reconnect grace: {fmt_uptime(grace_ms // 1000)}")
+    if deadline_ms:
+        lines.append(f"Peer deadline: {fmt_uptime(deadline_ms // 1000)}")
 
     if ua:
-        ua_short = ua[:60] + ("…" if len(ua) > 60 else "")
-        lines.append(f"UA: <code>{ua_short}</code>")
+        # Telemt отдаёт UA уже ограниченным ("bounded sanitized"), не режем второй раз
+        lines.append(f"UA: <code>{ua}</code>")
     if key_id:
         lines.append(f"Key: <code>{key_id}</code>")
-    if negotiation_left is not None:
-        lines.append(f"Negotiation left: {negotiation_left}с")
+    if negotiation_ms is not None:
+        lines.append(f"Negotiation left: {fmt_uptime(negotiation_ms // 1000)}")
 
     lines.append(f"\n<i>🕐 {_now_str()}</i>")
     return "\n".join(lines)
