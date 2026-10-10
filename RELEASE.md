@@ -42,6 +42,17 @@
 - Removed unused `telethon` dependency and its logger silencing
 - `tests/` and `conftest.py` excluded from the Docker image
 
+## Telemt 3.5.11 API Support
+
+- **rotate-secret** — user secret rotation via the dedicated `POST /v1/users/{username}/rotate-secret` endpoint (updates admission identity and WEB capability in one call)
+- **WEB links** — `tg://webproxy` links built the way Telegram Desktop expects: marker 0x70 (+0xDD), base64url secret, base path encoded into the server part
+- **Runtime snapshots** — new menus/endpoints: `/v1/health/ready`, `/v1/stats/zero/all`, `/v1/stats/minimal/all`, `/v1/stats/users/active-ips`, `/v1/runtime/me_pool_state`, `/v1/runtime/nat_stun`, `/v1/runtime/me-selftest`
+- **User deletion** — no longer waits on an instant reload; WEB profiles are stripped first so the API accepts the delete
+- **tg:// deep links** — proxy connect buttons open Telegram's add-proxy window directly (QR codes removed)
+- **Lite mode** — alert/check/reload commands are hard-disabled, not just hidden from the menu
+- **Docker scan** — base image digest bumped, Debian packages upgraded, pip removed from the runtime image to clear HIGH Trivy findings
+- **Quota alert** — fixed enablement and completed command/env reference docs
+
 ## WEB Proxy Support (Telemt 3.5.5+)
 
 - **WEB Proxy menu** — new button in main menu (visible only for Telemt 3.5.5+)

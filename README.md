@@ -5,7 +5,7 @@
 
 > Telegram bot for managing [Telemt MTProxy](https://github.com/telemt/telemt) servers via Control API v1.
 
-**Compatibility:** Telemt 3.4.14 — 3.5.5+
+**Compatibility:** Telemt 3.4.14 — 3.5.11+
 
 [🇷🇺 README на русском](README.ru.md)
 

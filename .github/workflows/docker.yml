@@ -100,3 +100,24 @@ jobs:
       - name: Image digest
         if: github.event_name != 'pull_request'
         run: echo "Pushed digest ${{ steps.push.outputs.digest }}"
+
+  # Релиз собирается из исходников в build-push; здесь создаётся GitHub Release
+  # с описанием из .github/RELEASE_BODY.md (обновляется в каждом релизном коммите).
+  release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [lint, test, build-push]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - name: Create GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          # Первая строка RELEASE_BODY.md — заголовок вида "# v1.6 — ..."
+          TITLE="$(head -1 .github/RELEASE_BODY.md | sed 's/^# //')"
+          gh release create "${GITHUB_REF_NAME}" \
+            --repo "$GITHUB_REPOSITORY" \
+            --title "$TITLE" \
+            --notes-file .github/RELEASE_BODY.md
