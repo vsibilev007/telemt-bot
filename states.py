@@ -20,7 +20,10 @@ class QuickAddFSM(StatesGroup):
 
 
 class BulkCreateFSM(StatesGroup):
-    waiting_spec = State()
+    waiting_template = State()
+    waiting_count = State()
+    waiting_days = State()
+    waiting_quota = State()
 
 
 class SearchUserFSM(StatesGroup):

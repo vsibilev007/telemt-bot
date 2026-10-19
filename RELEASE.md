@@ -1,10 +1,20 @@
 # Release Notes
 
+## v1.7 — Bilingual UI and Bulk Creation Wizard
+
+- **Bulk creation wizard** ("➕➕ Массово") replaces the one-line-only flow: name template → count (5/10/25/50 or custom) → expiry (+7/+30/+90, none or a specific date) → quota (none/10/50/100 GB or custom)
+- **Preview & confirm before creating** — shows the actual generated names (guest1…guestN), the concrete expiry date, quota and a WEB-profiles toggle (can opt out); nothing is created until "Create N" is pressed
+- **"♻️ Repeat" button** in the report — re-run the same batch with the same parameters (already-existing names are skipped)
+- The one-line spec (`guest 5 30`) still works as a fast path: send it in the template step and the bot jumps straight to the preview
+- **Bilingual UI (ru/en)** — all interface strings (commands, buttons, handlers, formatters, alerts, /help) live in `i18n_*.py` tables; switched with the `BOT_LANG=ru|en` environment variable (default `ru`, unchanged behavior)
+- `/help` is now translated and documents the wizard; i18n coverage tests (key definitions, ru+en pairs, placeholder/kwargs consistency) — test suite is now 88 tests
+- Progress "Modal" greeting uses a localized fallback name ("друг"/"friend") when the Telegram profile has no first name
+
 ## Bulk User Operations
 
 - **Multi-select mode** — "☑️ Выбрать" in the users list turns rows into checkboxes (paged, no refetch on toggle); "🔴 Откл / ✅ Вкл / 🗑 Удалить" apply to all selected users with per-user cluster results
 - **Bulk delete** — confirmation screen; WEB profiles are stripped from every cluster node before DELETE (the API rejects users referenced by a WEB profile)
-- **Bulk create** — "➕➕ Массово" button: one-line spec `template count days [quota_GB]` (e.g. `guest 10 30`, `vpn{n} 3 7 50`) creates numbered users with expiration/quota; existing names are skipped, not failed
+- **Bulk create** — "➕➕ Массово" button: since v1.7 a wizard (template → count → expiry → quota → preview) with the one-line spec `template count days [quota_GB]` (e.g. `guest 10 30`, `vpn{n} 3 7 50`) as a fast path; creates numbered users with expiration/quota; existing names are skipped, not failed
 - All WEB profiles for a bulk batch are added in a single `PATCH /v1/config?reload=instant` instead of one patch per user
 - Names are limited to 40 chars so `user:links:` callbacks stay under Telegram's 64-byte limit
 

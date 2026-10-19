@@ -71,7 +71,8 @@ def test_placeholders_match_call_kwargs():
         kwargs = {kw.arg: "x" for kw in node.keywords}
         for lang, val in row.items():
             try:
-                val.format(**kwargs)
+                if kwargs:
+                    val.format(**kwargs)
             except (IndexError, KeyError, ValueError):
                 # числовые плейсхолдеры ({pct:.0f}, {n:,}) не принимают str
                 try:

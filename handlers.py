@@ -947,32 +947,252 @@ def _parse_bulk_spec(text: str) -> tuple[list[str], int, int]:
 
 @router.callback_query(F.data == "user:bulk")
 async def cb_user_bulk(cq: CallbackQuery, state: FSMContext):
-    await state.set_state(BulkCreateFSM.waiting_spec)
+    await state.set_data({})
+    await state.set_state(BulkCreateFSM.waiting_template)
     await _safe_edit(
         cq,
-        t("h.bulk.menu_title") + "\n\n" + _bulk_spec_help(),
-        reply_markup=InlineKeyboardBuilder().button(
-            text=t("h.bulk.cancel_btn"), callback_data="menu:users"
-        ).adjust(1).as_markup(),
+        t("h.bulk.wiz.t1") + "\n\n" + _bulk_spec_help(),
+        reply_markup=InlineKeyboardBuilder()
+        .button(text=t("h.bulk.cancel_btn"), callback_data="bulk:cancel")
+        .adjust(1).as_markup(),
     )
 
 
-@router.message(BulkCreateFSM.waiting_spec, F.text)
-async def fsm_bulk_spec(message: Message, state: FSMContext, config: Config):
-    if message.text.startswith("/"):
+@router.message(BulkCreateFSM.waiting_template, F.text)
+async def fsm_bulk_template(message: Message, state: FSMContext):
+    if (message.text or "").startswith("/"):
         await state.clear()
         await message.answer(t("h.bulk.cancelled"))
         return
-
-    try:
-        names, days, quota_gb = _parse_bulk_spec(message.text or "")
-    except ValueError as e:
-        await message.answer(f"❌ {e}\n\n{_bulk_spec_help()}")
+    txt = message.text.strip()
+    # Быстрый путь: целая строка спеки «guest 5 30» → сразу превью
+    if len(txt.split()) >= 2:
+        try:
+            names, days, quota_gb = _parse_bulk_spec(txt)
+        except ValueError:
+            names = None
+        if names:
+            await state.update_data(bulk={
+                "tpl": txt.split()[0], "count": len(names),
+                "days": days, "date": "", "quota_gb": quota_gb, "web": True,
+            })
+            await state.set_state(BulkCreateFSM.confirm)
+            await message.answer(
+                "\n".join(_bulk_summary_lines((await state.get_data())["bulk"])),
+                reply_markup=_bulk_preview_kb((await state.get_data())["bulk"]),
+            )
+            return
+    # одиночный токен — шаблон
+    base = txt.replace("{n}", "")
+    if not base or not USERNAME_RE.match(base) or len(_bulk_names(txt, 2)[0]) > BULK_NAME_MAX:
+        await message.answer(t("h.bulk.wiz.t1_bad"))
         return
+    await state.update_data(bulk={
+        "tpl": txt, "count": 0, "days": 0, "date": "", "quota_gb": 0, "web": True,
+    })
+    await state.set_state(BulkCreateFSM.waiting_count)
+    await message.answer(t("h.bulk.wiz.t2"), reply_markup=_bulk_count_kb())
 
-    await state.clear()
-    uid = _uid(message)
-    client, srv = await get_client(uid, config)
+
+def _bulk_count_kb() -> InlineKeyboardMarkup:
+    kb = InlineKeyboardBuilder()
+    for n in (5, 10, 25, 50):
+        kb.button(text=str(n), callback_data=f"bulk:count:{n}")
+    kb.button(text=t("h.bulk.wiz.btn_custom"), callback_data="bulk:count:0")
+    kb.button(text=t("h.bulk.cancel_btn"), callback_data="bulk:cancel")
+    kb.adjust(4, 1, 1)
+    return kb.as_markup()
+
+
+def _bulk_days_kb() -> InlineKeyboardMarkup:
+    kb = InlineKeyboardBuilder()
+    for n in (7, 30, 90):
+        kb.button(text=t("h.bulk.wiz.btn_days", n=n), callback_data=f"bulk:days:{n}")
+    kb.button(text=t("h.bulk.wiz.btn_noexp"), callback_data="bulk:days:0")
+    kb.button(text=t("h.bulk.wiz.btn_date"), callback_data="bulk:days:date")
+    kb.button(text=t("h.bulk.wiz.btn_back"), callback_data="bulk:tocount")
+    kb.button(text=t("h.bulk.cancel_btn"), callback_data="bulk:cancel")
+    kb.adjust(3, 2, 1, 1)
+    return kb.as_markup()
+
+
+def _bulk_quota_kb() -> InlineKeyboardMarkup:
+    kb = InlineKeyboardBuilder()
+    for n in (10, 50, 100):
+        kb.button(text=str(n), callback_data=f"bulk:quota:{n}")
+    kb.button(text=t("h.bulk.wiz.btn_noquota"), callback_data="bulk:quota:0")
+    kb.button(text=t("h.bulk.wiz.btn_custom"), callback_data="bulk:quota:custom")
+    kb.button(text=t("h.bulk.wiz.btn_back"), callback_data="bulk:todays")
+    kb.button(text=t("h.bulk.cancel_btn"), callback_data="bulk:cancel")
+    kb.adjust(3, 2, 1, 1)
+    return kb.as_markup()
+
+
+def _bulk_summary_lines(data: dict) -> list[str]:
+    tpl, count = data["tpl"], data["count"]
+    names = _bulk_names(tpl, count)
+    names_s = ", ".join(names[:8]) + (t("h.common.more", n=count - 8) if count > 8 else "")
+    if data.get("date"):
+        exp_line = t("h.bulk.wiz.pv_exp_date", d=data["date"])
+    elif data.get("days"):
+        d = (datetime.now(timezone.utc) + timedelta(days=data["days"])).strftime("%Y-%m-%d")
+        exp_line = t("h.bulk.wiz.pv_exp_days", days=data["days"], d=d)
+    else:
+        exp_line = t("h.bulk.wiz.pv_exp_none")
+    quota_line = (
+        t("h.bulk.wiz.pv_quota", n=data["quota_gb"])
+        if data.get("quota_gb") else t("h.bulk.wiz.pv_quota_none")
+    )
+    web_line = t("h.bulk.wiz.pv_web_on" if data.get("web", True) else "h.bulk.wiz.pv_web_off")
+    return [
+        t("h.bulk.wiz.pv_title"), "",
+        t("h.bulk.wiz.pv_names", names=names_s),
+        exp_line, quota_line, web_line,
+    ]
+
+
+def _bulk_preview_kb(data: dict) -> InlineKeyboardMarkup:
+    kb = InlineKeyboardBuilder()
+    kb.button(text=t("h.bulk.wiz.btn_create", n=data["count"]), callback_data="bulk:go")
+    kb.button(
+        text=t("h.bulk.wiz.pv_web_on" if data.get("web", True) else "h.bulk.wiz.pv_web_off"),
+        callback_data="bulk:web",
+    )
+    kb.button(text=t("h.bulk.wiz.btn_back"), callback_data="bulk:tocount")
+    kb.button(text=t("h.bulk.cancel_btn"), callback_data="bulk:cancel")
+    kb.adjust(1)
+    return kb.as_markup()
+
+
+async def _bulk_show_preview(cq: CallbackQuery, state: FSMContext):
+    data = (await state.get_data())["bulk"]
+    await state.set_state(BulkCreateFSM.confirm)
+    await _safe_edit(cq, "\n".join(_bulk_summary_lines(data)), reply_markup=_bulk_preview_kb(data))
+
+
+@router.callback_query(F.data.startswith("bulk:"))
+async def cb_bulk(cq: CallbackQuery, state: FSMContext, config: Config):
+    parts = cq.data.split(":")
+    action, arg = parts[1], parts[2] if len(parts) > 2 else ""
+    data = (await state.get_data()).get("bulk")
+    if action == "cancel":
+        await cq.answer()
+        await state.clear()
+        await _safe_edit(cq, t("h.bulk.cancelled"))
+        return
+    if not data:
+        await cq.answer(t("h.bulk.wiz.lost"), show_alert=True)
+        return
+    await cq.answer()
+    if action == "count":
+        if arg == "0":
+            await state.set_state(BulkCreateFSM.waiting_count)
+            await _safe_edit(cq, t("h.bulk.wiz.count_prompt"))
+        else:
+            data["count"] = int(arg)
+            await state.update_data(bulk=data)
+            await state.set_state(BulkCreateFSM.waiting_days)
+            await _safe_edit(cq, t("h.bulk.wiz.t3"), reply_markup=_bulk_days_kb())
+    elif action == "tocount":
+        await state.set_state(BulkCreateFSM.waiting_count)
+        await _safe_edit(cq, t("h.bulk.wiz.count_prompt"))
+    elif action == "days":
+        if arg == "date":
+            await state.set_state(BulkCreateFSM.waiting_days)
+            await _safe_edit(cq, t("h.bulk.wiz.days_prompt"))
+        else:
+            data["days"] = int(arg)
+            data["date"] = ""
+            await state.update_data(bulk=data)
+            await state.set_state(BulkCreateFSM.waiting_quota)
+            await _safe_edit(cq, t("h.bulk.wiz.t4"), reply_markup=_bulk_quota_kb())
+    elif action == "todays":
+        await state.set_state(BulkCreateFSM.waiting_days)
+        await _safe_edit(cq, t("h.bulk.wiz.days_prompt"))
+    elif action == "quota":
+        if arg == "custom":
+            await state.set_state(BulkCreateFSM.waiting_quota)
+            await _safe_edit(cq, t("h.bulk.wiz.quota_prompt"))
+        else:
+            data["quota_gb"] = int(arg)
+            await state.update_data(bulk=data)
+            await _bulk_show_preview(cq, state)
+    elif action == "web":
+        data["web"] = not data.get("web", True)
+        await state.update_data(bulk=data)
+        await _bulk_show_preview(cq, state)
+    elif action == "again":
+        await _bulk_show_preview(cq, state)
+    elif action == "go":
+        await _bulk_run(cq, state, config)
+
+
+@router.message(BulkCreateFSM.waiting_count, F.text)
+async def fsm_bulk_count(message: Message, state: FSMContext):
+    if (message.text or "").startswith("/"):
+        await state.clear()
+        await message.answer(t("h.bulk.cancelled"))
+        return
+    txt = (message.text or "").strip()
+    if not txt.isdigit() or not 1 <= int(txt) <= BULK_MAX_COUNT:
+        await message.answer(t("h.bulk.count_range", n=BULK_MAX_COUNT))
+        return
+    data = (await state.get_data())["bulk"]
+    data["count"] = int(txt)
+    await state.update_data(bulk=data)
+    await state.set_state(BulkCreateFSM.waiting_days)
+    await message.answer(t("h.bulk.wiz.t3"), reply_markup=_bulk_days_kb())
+
+
+@router.message(BulkCreateFSM.waiting_days, F.text)
+async def fsm_bulk_days(message: Message, state: FSMContext):
+    if (message.text or "").startswith("/"):
+        await state.clear()
+        await message.answer(t("h.bulk.cancelled"))
+        return
+    txt = (message.text or "").strip()
+    data = (await state.get_data())["bulk"]
+    if txt.isdigit():
+        data["days"], data["date"] = min(int(txt), 3650), ""
+    elif re.match(r"^\d{4}-\d{2}-\d{2}$", txt):
+        data["days"], data["date"] = 0, txt + "T00:00:00Z"
+    else:
+        await message.answer(t("h.create.step4_err"))
+        return
+    await state.update_data(bulk=data)
+    await state.set_state(BulkCreateFSM.waiting_quota)
+    await message.answer(t("h.bulk.wiz.t4"), reply_markup=_bulk_quota_kb())
+
+
+@router.message(BulkCreateFSM.waiting_quota, F.text)
+async def fsm_bulk_quota(message: Message, state: FSMContext):
+    if (message.text or "").startswith("/"):
+        await state.clear()
+        await message.answer(t("h.bulk.cancelled"))
+        return
+    txt = (message.text or "").strip()
+    if not txt.isdigit() or int(txt) > 1024:
+        await message.answer(t("h.bulk.quota_range"))
+        return
+    data = (await state.get_data())["bulk"]
+    data["quota_gb"] = int(txt)
+    await state.update_data(bulk=data)
+    await state.set_state(BulkCreateFSM.confirm)
+    await message.answer(
+        "\n".join(_bulk_summary_lines(data)),
+        reply_markup=_bulk_preview_kb(data),
+    )
+
+
+async def _bulk_run(cq: CallbackQuery, state: FSMContext, config: Config):
+    data = (await state.get_data()).get("bulk")
+    if not data:
+        await _safe_edit(cq, t("h.bulk.wiz.lost"))
+        return
+    names = _bulk_names(data["tpl"], data["count"])
+    days, date_str, quota_gb = data.get("days") or 0, data.get("date"), data.get("quota_gb") or 0
+
+    client, srv = await get_client(_uid(cq), config)
     members = config.get_group_members(srv)
 
     # Предзагрузка существующих: лишние 409 не шлём
@@ -981,7 +1201,7 @@ async def fsm_bulk_spec(message: Message, state: FSMContext, config: Config):
     except Exception:
         existing = set()
 
-    status = await message.answer(t("h.bulk.creating", n=len(names)))
+    await _safe_edit(cq, t("h.bulk.creating", n=len(names)))
 
     created: list[str] = []
     skipped: list[str] = []
@@ -993,7 +1213,9 @@ async def fsm_bulk_spec(message: Message, state: FSMContext, config: Config):
             skipped.append(name)
             continue
         payload: dict = {"username": name}
-        if days:
+        if date_str:
+            payload["expiration_rfc3339"] = date_str
+        elif days:
             payload["expiration_rfc3339"] = (
                 datetime.now(timezone.utc) + timedelta(days=days)
             ).strftime("%Y-%m-%dT%H:%M:%SZ")
@@ -1012,7 +1234,7 @@ async def fsm_bulk_spec(message: Message, state: FSMContext, config: Config):
 
     # WEB-профили: один PATCH на всю пачку (vhosts — массив, заменяется целиком)
     web_warn = ""
-    if created:
+    if created and data.get("web", True):
         try:
             cfg = await client.get_config()
             vhosts = (cfg.get("web") or {}).get("vhosts") or []
@@ -1048,7 +1270,9 @@ async def fsm_bulk_spec(message: Message, state: FSMContext, config: Config):
         lines.append(f"❌ {name}: {err}")
     if len(failed) > 10:
         lines.append(t("h.bulk.more_errors", n=len(failed) - 10))
-    if days:
+    if date_str:
+        lines.append(t("h.bulk.wiz.pv_exp_date", d=date_str[:10]))
+    elif days:
         lines.append(t("h.bulk.days_n", n=days))
     if quota_gb:
         lines.append(t("h.bulk.quota_n", n=quota_gb))
@@ -1059,10 +1283,12 @@ async def fsm_bulk_spec(message: Message, state: FSMContext, config: Config):
         kb.button(text=f"🔗 {name}", callback_data=f"user:links:{name}")
     if len(created) > 8:
         lines.append(t("h.bulk.links_hint"))
+    kb.button(text=t("h.bulk.wiz.btn_again"), callback_data="bulk:again")
     kb.button(text=t("h.bulk.to_users"), callback_data="menu:users")
-    kb.adjust(2 if created else 1)
+    kb.adjust(2)
+    await state.set_state(None)
 
-    await status.edit_text("\n".join(lines), reply_markup=kb.as_markup())
+    await _safe_edit(cq, "\n".join(l for l in lines if l), reply_markup=kb.as_markup())
 
 
 def _parse_exp(exp: str):
@@ -3195,66 +3421,13 @@ async def cmd_id(message: Message):
 
 @router.message(Command("help"))
 async def cmd_help(message: Message):
-    await message.answer(
-        "<b>📖 Telemt Manager Bot — справка</b>\n"
-        "\n"
-        "<b>Команды</b>\n"
-        "/menu — главное меню\n"
-        "/adduser <code>имя [дней]</code> — быстро создать клиента\n"
-        "       <i>пример: /adduser vasya 30</i>\n"
-        "/find <code>запрос</code> — поиск клиента по имени\n"
-        "       <i>пример: /find vas  →  найдёт vasya, vasiliy…</i>\n"
-        "/check <code>tg://proxy?...</code> — диагностика узла\n"
-        "       <i>проверка: DNS, TCP, SSH, Ping, MTProto</i>\n"
-        "/alerts — включить / выключить алерты\n"
-        "/alert_log — история последних 20 алертов\n"
-        "/reload <code>[instant|drain]</code> — runtime reload (3.4.25+)\n"
-        "       <i>instant — мгновенное, drain — плавное завершение сессий</i>\n"
-        "/reload_status <code>&lt;id&gt;</code> — статус reload операции\n"
-        "       <i>accepted/preparing/activating/succeeded/failed</i>\n"
-        "/id — ваш Telegram ID\n"
-        "\n"
-        "<b>Главное меню</b>\n"
-        "🟢 <b>Состояние сервера</b> — dashboard: статус, uptime, версия, "
-        "соединения, bad-классы, handshake-ошибки\n"
-        "📊 <b>Отчёт по трафику</b> — все клиенты за 1/7/30 дней, "
-        "сортировка по потреблению, 📈 график топ-15\n"
-        "👥 <b>Все клиенты</b> — список с пагинацией и 🔍 поиском\n"
-        "➕ <b>Новый клиент</b> — пошаговый мастер (6 шагов)\n"
-        "⚡ <b>Runtime</b> — Gates, Init, ME Quality, Upstream Quality, "
-        "Events, Connections, TLS Fingerprints\n"
-        "⚠️ <b>Истекающие</b> — клиенты с истекающим сроком, "
-        "массовое удаление истёкших\n"
-        "🔒 <b>Безопасность</b> — Posture, IP Whitelist, Effective Limits\n"
-        "🔗 <b>Upstreams</b> — RTT и статус апстримов\n"
-        "📡 <b>DC / Writers</b> — статус датацентров и ME Writers\n"
-        "📤 <b>Бэкап</b> — выгрузка <code>telemt.toml</code> файлом в чат\n"
-        "🌐 <b>WEB Proxy</b> — статус, сессии, lifecycle (pause/drain/resume), debug\n"
-        "🔍 <b>Проверить прокси</b> — диагностика узла: DNS, TCP, SSH, Ping, MTProto\n"
-        "⚙️ <b>Конфиг</b> — редактирование настроек сервера (General, Timeouts, Censorship…)\n"
-        "\n"
-        "<b>Runtime Reload (3.4.25+)</b>\n"
-        "/reload instant — мгновенное переключение поколения\n"
-        "/reload drain — плавное завершение старых сессий\n"
-        "/reload_status — проверка статуса reload\n"
-        "Нужен при изменении: censorship, timeouts, upstreams, general.modes\n"
-        "НЕ нужен при: server, network, пути логов\n"
-        "\n"
-        "<b>Карточка клиента</b>\n"
-        "Редактирование полей • смена секрета • 🔄 сброс квоты • "
-        "📊 история трафика с 📈 графиком (24ч / 7 / 14 / 30 дней)\n"
-        "\n"
-        "<b>Ссылки</b>\n"
-        "Над каждой TLS-ссылкой показывается домен маскировки (SNI)\n"
-        "«Подключить» открывает окно добавления прокси в Telegram\n"
-        "\n"
-        "<b>Алерты</b> — 10 типов:\n"
-        "падение / восстановление сервера • всплеск соединений • "
-        "Writers coverage • обновление версии • неизвестный SNI • "
-        "всплеск HS timeout • плохих TLS клиентов • сброс при handshake • "
-        "превышение квоты\n"
-        "Cooldown и пороги настраиваются через <code>.env</code>\n"
-        "\n"
-        "<b>Мультисервер</b> — переключение серверов прямо из главного меню. "
-        "Выбор сохраняется между перезапусками бота."
-    )
+    await message.answer("\n\n".join([
+        t("h.help.title"),
+        t("h.help.commands"),
+        t("h.help.menu"),
+        t("h.help.reload"),
+        t("h.help.card"),
+        t("h.help.links"),
+        t("h.help.alerts"),
+        t("h.help.multi"),
+    ]))

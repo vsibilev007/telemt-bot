@@ -88,6 +88,148 @@ HANDLERS: dict[str, dict[str, str]] = {
     "h.bulk.bad_name": {"ru": "Имя <code>{name}</code> не подходит: латиница/цифры/._- , 1–64 символа", "en": "Name <code>{name}</code> is invalid: letters/digits/._- , 1-64 chars"},
     "h.bulk.name_too_long": {"ru": "Имя <code>{name}</code> длиннее {n} символов — укоротите шаблон", "en": "Name <code>{name}</code> exceeds {n} chars — shorten the template"},
     "h.bulk.menu_title": {"ru": "<b>➕➕ Массовое создание клиентов</b>", "en": "<b>➕➕ Bulk client creation</b>"},
+    "h.bulk.wiz.t1": {
+        "ru": "➕➕ <b>Массовое создание клиентов</b>\n\nОтправь <b>шаблон имени</b> — <code>guest</code> или <code>vpn{n}</code> ({n} — номер 1,2,…) — или сразу готовую строку ниже.",
+        "en": "➕➕ <b>Bulk client creation</b>\n\nSend the <b>name template</b> — <code>guest</code> or <code>vpn{n}</code> ({n} = number 1,2,...) — or the ready-made line below.",
+    },
+    "h.bulk.wiz.t1_bad": {
+        "ru": "❌ Шаблон не подходит: латиница/цифры/._- , 1–64 символа, длина имени ≤ 40.",
+        "en": "❌ Invalid template: letters/digits/._- , 1-64 chars, name length ≤ 40.",
+    },
+    "h.bulk.wiz.t2": {"ru": "2️⃣ <b>Сколько юзеров создать?</b>", "en": "2️⃣ <b>How many users to create?</b>"},
+    "h.bulk.wiz.t3": {"ru": "3️⃣ <b>Срок действия</b>", "en": "3️⃣ <b>Expiration</b>"},
+    "h.bulk.wiz.t4": {"ru": "4️⃣ <b>Квота трафика</b>", "en": "4️⃣ <b>Traffic quota</b>"},
+    "h.bulk.wiz.count_prompt": {"ru": "🔢 Количество юзеров (1–50):", "en": "🔢 Number of users (1-50):"},
+    "h.bulk.wiz.days_prompt": {"ru": "📅 Число дней или дата YYYY-MM-DD:", "en": "📅 Days count or date YYYY-MM-DD:"},
+    "h.bulk.wiz.quota_prompt": {"ru": "💾 Квота в ГБ (0 — без квоты, до 1024):", "en": "💾 Quota in GB (0 = none, up to 1024):"},
+    "h.bulk.wiz.pv_title": {"ru": "📋 <b>Проверка перед созданием</b>", "en": "📋 <b>Review before creating</b>"},
+    "h.bulk.wiz.pv_names": {"ru": "👥 Имена: {names}", "en": "👥 Names: {names}"},
+    "h.bulk.wiz.pv_exp_days": {"ru": "📅 Срок: +{days} дн (до {d})", "en": "📅 Expiry: +{days} d (until {d})"},
+    "h.bulk.wiz.pv_exp_date": {"ru": "📅 Срок: до {d}", "en": "📅 Expiry: until {d}"},
+    "h.bulk.wiz.pv_exp_none": {"ru": "♾ Срок: без срока", "en": "♾ Expiry: none"},
+    "h.bulk.wiz.pv_quota": {"ru": "💾 Квота: {n} ГБ на юзера", "en": "💾 Quota: {n} GB per user"},
+    "h.bulk.wiz.pv_quota_none": {"ru": "💾 Квота: нет", "en": "💾 Quota: none"},
+    "h.bulk.wiz.pv_web_on": {"ru": "🌐 WEB-профили: ✅ Да", "en": "🌐 WEB profiles: ✅ On"},
+    "h.bulk.wiz.pv_web_off": {"ru": "🌐 WEB-профили: ❌ Нет", "en": "🌐 WEB profiles: ❌ Off"},
+    "h.bulk.wiz.btn_create": {"ru": "✅ Создать {n}", "en": "✅ Create {n}"},
+    "h.bulk.wiz.btn_days": {"ru": "+{n} дн", "en": "+{n} d"},
+    "h.bulk.wiz.btn_custom": {"ru": "🔢 Другое…", "en": "🔢 Custom…"},
+    "h.bulk.wiz.btn_noexp": {"ru": "♾ Без срока", "en": "♾ No expiry"},
+    "h.bulk.wiz.btn_noquota": {"ru": "🚫 Без квоты", "en": "🚫 No quota"},
+    "h.bulk.wiz.btn_date": {"ru": "📅 Дата…", "en": "📅 Date…"},
+    "h.bulk.wiz.btn_back": {"ru": "✏️ Изменить", "en": "✏️ Edit"},
+    "h.bulk.wiz.btn_again": {"ru": "♻️ Повторить", "en": "♻️ Repeat"},
+    "h.bulk.wiz.lost": {
+        "ru": "❌ Данные шагов потеряны — начни «➕➕ Массово» заново.",
+        "en": "❌ Wizard data lost — start Bulk again.",
+    },
+
+    # ─── Справка /help ─────────────────────────────────────────────────────
+    "h.help.title": {"ru": "📖 <b>Telemt Manager Bot — справка</b>", "en": "📖 <b>Telemt Manager Bot — help</b>"},
+    "h.help.commands": {
+        "ru": "<b>Команды</b>\n"
+              "/menu — главное меню\n"
+              "/adduser <code>имя [дней]</code> — быстро создать клиента\n"
+              "       <i>пример: /adduser vasya 30</i>\n"
+              "/find <code>запрос</code> — поиск клиента по имени\n"
+              "       <i>пример: /find vas  →  найдёт vasya, vasiliy…</i>\n"
+              "/check <code>tg://proxy?...</code> — диагностика узла\n"
+              "       <i>проверка: DNS, TCP, SSH, Ping, MTProto</i>\n"
+              "/alerts — включить / выключить алерты\n"
+              "/alert_log — история последних 20 алертов\n"
+              "/reload <code>[instant|drain]</code> — runtime reload (3.4.25+)\n"
+              "       <i>instant — мгновенное, drain — плавное завершение сессий</i>\n"
+              "/reload_status <code>&lt;id&gt;</code> — статус reload операции\n"
+              "       <i>accepted/preparing/activating/succeeded/failed</i>\n"
+              "/id — ваш Telegram ID",
+        "en": "<b>Commands</b>\n"
+              "/menu — main menu\n"
+              "/adduser <code>name [days]</code> — quickly create a client\n"
+              "       <i>example: /adduser vasya 30</i>\n"
+              "/find <code>query</code> — search for a client by name\n"
+              "       <i>example: /find vas  →  finds vasya, vasiliy…</i>\n"
+              "/check <code>tg://proxy?...</code> — node diagnostics\n"
+              "       <i>checks: DNS, TCP, SSH, Ping, MTProto</i>\n"
+              "/alerts — enable / disable alerts\n"
+              "/alert_log — last 20 alerts\n"
+              "/reload <code>[instant|drain]</code> — runtime reload (3.4.25+)\n"
+              "       <i>instant — instant, drain — graceful session finish</i>\n"
+              "/reload_status <code>&lt;id&gt;</code> — reload operation status\n"
+              "       <i>accepted/preparing/activating/succeeded/failed</i>\n"
+              "/id — your Telegram ID",
+    },
+    "h.help.menu": {
+        "ru": "<b>Главное меню</b>\n"
+              "🟢 <b>Состояние сервера</b> — dashboard: статус, uptime, версия, соединения, bad-классы, handshake-ошибки\n"
+              "📊 <b>Отчёт по трафику</b> — все клиенты за 1/7/30 дней, сортировка по потреблению, 📈 график топ-15\n"
+              "👥 <b>Все клиенты</b> — список с пагинацией и 🔍 поиском\n"
+              "➕ <b>Новый клиент</b> — пошаговый мастер (6 шагов)\n"
+              "➕➕ <b>Массово</b> — несколько юзеров за раз: шаблон имени, кнопки количества и срока, квота — перед созданием показывает превью\n"
+              "⚡ <b>Runtime</b> — Gates, Init, ME Quality, Upstream Quality, Events, Connections, TLS Fingerprints\n"
+              "⚠️ <b>Истекающие</b> — клиенты с истекающим сроком, массовое удаление истёкших\n"
+              "🔒 <b>Безопасность</b> — Posture, IP Whitelist, Effective Limits\n"
+              "🔗 <b>Upstreams</b> — RTT и статус апстримов\n"
+              "📡 <b>DC / Writers</b> — статус датацентров и ME Writers\n"
+              "📤 <b>Бэкап</b> — выгрузка <code>telemt.toml</code> файлом в чат\n"
+              "🌐 <b>WEB Proxy</b> — статус, сессии, lifecycle (pause/drain/resume), debug\n"
+              "🔍 <b>Проверить прокси</b> — диагностика узла: DNS, TCP, SSH, Ping, MTProto\n"
+              "⚙️ <b>Конфиг</b> — редактирование настроек сервера (General, Timeouts, Censorship…)",
+        "en": "<b>Main menu</b>\n"
+              "🟢 <b>Server state</b> — dashboard: status, uptime, version, connections, bad classes, handshake errors\n"
+              "📊 <b>Traffic report</b> — all clients for 1/7/30 days, sorted by consumption, 📈 top-15 chart\n"
+              "👥 <b>All clients</b> — list with pagination and 🔍 search\n"
+              "➕ <b>New client</b> — step-by-step wizard (6 steps)\n"
+              "➕➕ <b>Bulk</b> — several users at once: name template, count and expiry buttons, quota — with a preview before creating\n"
+              "⚡ <b>Runtime</b> — Gates, Init, ME Quality, Upstream Quality, Events, Connections, TLS fingerprints\n"
+              "⚠️ <b>Expiring</b> — clients with an expiring term, mass delete of expired ones\n"
+              "🔒 <b>Security</b> — Posture, IP Whitelist, Effective Limits\n"
+              "🔗 <b>Upstreams</b> — RTT and status of upstreams\n"
+              "📡 <b>DC / Writers</b> — datacenter and ME Writers status\n"
+              "📤 <b>Backup</b> — unload <code>telemt.toml</code> as a file to the chat\n"
+              "🌐 <b>WEB Proxy</b> — status, sessions, lifecycle (pause/drain/resume), debug\n"
+              "🔍 <b>Check proxy</b> — node diagnostics: DNS, TCP, SSH, Ping, MTProto\n"
+              "⚙️ <b>Config</b> — editing server settings (General, Timeouts, Censorship…)",
+    },
+    "h.help.reload": {
+        "ru": "<b>Runtime Reload (3.4.25+)</b>\n"
+              "/reload instant — мгновенное переключение поколения\n"
+              "/reload drain — плавное завершение старых сессий\n"
+              "/reload_status — проверка статуса reload\n"
+              "Нужен при изменении: censorship, timeouts, upstreams, general.modes\n"
+              "НЕ нужен при: server, network, пути логов",
+        "en": "<b>Runtime Reload (3.4.25+)</b>\n"
+              "/reload instant — instant generation switch\n"
+              "/reload drain — graceful finish of old sessions\n"
+              "/reload_status — check reload status\n"
+              "Needed after changing: censorship, timeouts, upstreams, general.modes\n"
+              "NOT needed after: server, network, log paths",
+    },
+    "h.help.card": {
+        "ru": "<b>Карточка клиента</b>\n"
+              "Редактирование полей • смена секрета • 🔄 сброс квоты • 📊 история трафика с 📈 графиком (24ч / 7 / 14 / 30 дней)",
+        "en": "<b>Client card</b>\n"
+              "Field editing • secret rotation • 🔄 quota reset • 📊 traffic history with 📈 chart (24h / 7 / 14 / 30 days)",
+    },
+    "h.help.links": {
+        "ru": "<b>Ссылки</b>\n"
+              "Над каждой TLS-ссылкой показывается домен маскировки (SNI)\n"
+              "«Подключить» открывает окно добавления прокси в Telegram",
+        "en": "<b>Links</b>\n"
+              "Every TLS link shows its mask domain (SNI) on top\n"
+              "«Connect» opens the Telegram add-proxy window",
+    },
+    "h.help.alerts": {
+        "ru": "<b>Алерты</b> — 10 типов:\n"
+              "падение / восстановление сервера • всплеск соединений • Writers coverage • обновление версии • неизвестный SNI • всплеск HS timeout • плохих TLS клиентов • сброс при handshake • превышение квоты\n"
+              "Cooldown и пороги настраиваются через <code>.env</code>",
+        "en": "<b>Alerts</b> — 10 types:\n"
+              "server down / recovery • connection spike • Writers coverage • new version • unknown SNI • HS timeout spike • bad TLS clients • reset at handshake • quota exceeded\n"
+              "Cooldown and thresholds are configured via <code>.env</code>",
+    },
+    "h.help.multi": {
+        "ru": "<b>Мультисервер</b> — переключение серверов прямо из главного меню. Выбор сохраняется между перезапусками бота.",
+        "en": "<b>Multi-server</b> — switch servers right in the main menu. The choice is saved between bot restarts.",
+    },
     "h.bulk.spec_help": {
         "ru": "Отправь параметры одной строкой:\n"
               "<code>шаблон количество дней [квота_GB]</code>\n\n"

@@ -30,6 +30,8 @@ docker compose up -d
 | Category | Capabilities |
 |----------|-------------|
 | **Client Management** | Create, edit, delete users; traffic history with charts |
+| **Bulk Wizard** | Mass user creation: name template + count/expiry/quota buttons, preview & confirm before creating, "Repeat" for the same batch |
+| **Bilingual UI** | Russian and English interface, `BOT_LANG=ru\|en` (default: `ru`) |
 | **Monitoring** | Dashboard, runtime, security, DC/Writers, upstreams |
 | **Alerts** | 10 event types with configurable thresholds and cooldowns |
 | **HA Cluster** | Parallel write operations across nodes, aggregated reads |
@@ -94,6 +96,7 @@ telemt-bot/
 ├── handlers.py         # Command and callback handlers
 ├── keyboards.py        # Inline keyboards
 ├── formatters.py       # HTML response formatting
+├── i18n*.py            # Bilingual UI strings (ru/en)
 ├── api_client.py       # HTTP client + cluster operations
 ├── database.py         # SQLite: traffic, alerts, sessions
 ├── scheduler.py        # Background tasks and alerts
