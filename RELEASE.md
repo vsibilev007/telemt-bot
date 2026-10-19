@@ -2,9 +2,9 @@
 
 ## v1.7 — Bilingual UI and Bulk Creation Wizard
 
-- **Bulk creation wizard** ("➕➕ Массово") replaces the one-line-only flow: name template → count (5/10/25/50 or custom) → expiry (+7/+30/+90, none or a specific date) → quota (none/10/50/100 GB or custom)
+- **Bulk creation wizard** ("Bulk" button) replaces the one-line-only flow: name template -> count (5/10/25/50 or custom) -> expiry (+7/+30/+90, none or a specific date) -> quota (none/10/50/100 GB or custom)
 - **Preview & confirm before creating** — shows the actual generated names (guest1…guestN), the concrete expiry date, quota and a WEB-profiles toggle (can opt out); nothing is created until "Create N" is pressed
-- **"♻️ Repeat" button** in the report — re-run the same batch with the same parameters (already-existing names are skipped)
+- **"Repeat" button** in the report — re-run the same batch with the same parameters (already-existing names are skipped)
 - The one-line spec (`guest 5 30`) still works as a fast path: send it in the template step and the bot jumps straight to the preview
 - **Bilingual UI (ru/en)** — all interface strings (commands, buttons, handlers, formatters, alerts, /help) live in `i18n_*.py` tables; switched with the `BOT_LANG=ru|en` environment variable (default `ru`, unchanged behavior)
 - `/help` is now translated and documents the wizard; i18n coverage tests (key definitions, ru+en pairs, placeholder/kwargs consistency) — test suite is now 88 tests

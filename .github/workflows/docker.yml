@@ -117,12 +117,19 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          # Первая строка RELEASE_BODY.md — заголовок вида "# v1.7 — ..."
+          # Первая строка RELEASE_BODY.md — заголовок вида "# v1.7 ..."
           TITLE="$(head -1 .github/RELEASE_BODY.md | sed 's/^# //')"
-          gh release create "${GITHUB_REF_NAME}" \
-            --repo "$GITHUB_REPOSITORY" \
-            --title "$TITLE" \
-            --notes-file .github/RELEASE_BODY.md
+          if gh release view "${GITHUB_REF_NAME}" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            gh release edit "${GITHUB_REF_NAME}" \
+              --repo "$GITHUB_REPOSITORY" \
+              --title "$TITLE" \
+              --notes-file .github/RELEASE_BODY.md
+          else
+            gh release create "${GITHUB_REF_NAME}" \
+              --repo "$GITHUB_REPOSITORY" \
+              --title "$TITLE" \
+              --notes-file .github/RELEASE_BODY.md
+          fi
 
   # Автообновляемый pre-release «rolling»: после каждого успешного билда main
   # страница Releases показывает свежий список коммитов и ссылку на образ.
@@ -143,23 +150,23 @@ jobs:
         run: |
           LAST_TAG="$(git describe --tags --abbrev=0 --exclude 'rolling' 2>/dev/null || true)"
           {
-            echo "# Сборка main — $(date -u '+%Y-%m-%d %H:%M UTC') ($(git rev-parse --short HEAD))"
+            echo "# Build from main — $(date -u '+%Y-%m-%d %H:%M UTC') ($(git rev-parse --short HEAD))"
             echo
             if [ -n "$LAST_TAG" ]; then
-              echo "Стабильный релиз: \`${LAST_TAG}\`."
+              echo "Stable release: \`${LAST_TAG}\`."
               echo
-              echo "Изменения после \`${LAST_TAG}\`:"
+              echo "Changes since \`${LAST_TAG}\`:"
               echo
               git log "${LAST_TAG}..HEAD" --format='- %h %s' | head -40
               echo
-              echo "Полный diff: ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/compare/${LAST_TAG}...${SHA}"
+              echo "Full diff: ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/compare/${LAST_TAG}...${SHA}"
             else
-              echo "Стабильных тегов нет:"
+              echo "No stable tags yet:"
               echo
               git log -20 --format='- %h %s'
             fi
             echo
-            echo 'Образ этой сборки:'
+            echo 'Image of this build:'
             echo '```'
             echo "docker pull ghcr.io/vsibilev007/telemt-bot:main"
             echo '```'
