@@ -16,6 +16,7 @@ from apscheduler.triggers.interval import IntervalTrigger
 
 from api_client import TelemetClient, ApiError
 from config import Config
+from i18n import t
 import database as db
 
 logger = logging.getLogger(__name__)
@@ -38,7 +39,7 @@ def safe_job(name: str):
             try:
                 return await fn(*args, **kwargs)
             except Exception as e:
-                logger.error("Джоба [%s] упала с ошибкой: %s", name, e, exc_info=True)
+                logger.error(t("sch.job_failed"), name, e, exc_info=True)
         return wrapper
     return decorator
 
@@ -77,13 +78,13 @@ def setup(bot, config: Config):
     )
 
     _scheduler.start()
-    logger.info("Scheduler запущен (4 задачи)")
+    logger.info(t("sch.scheduler_on"), 4)
 
 
 def stop():
     if _scheduler and _scheduler.running:
         _scheduler.shutdown(wait=False)
-        logger.info("Scheduler остановлен")
+        logger.info(t("sch.scheduler_off"))
 
 
 @safe_job("heartbeat")
@@ -138,17 +139,16 @@ async def _collect_traffic():
                         if pct >= thr.quota_alert_pct:
                             await _fire_alert(
                                 srv.name, "quota_warn",
-                                f"📊 <b>{srv.name}</b> — клиент <code>{u['username']}</code> "
-                                f"использовал {pct:.0f}% квоты "
-                                f"({_fmt_bytes(used)} / {_fmt_bytes(quota)})",
+                                t("sch.quota_warn", srv=srv.name, user=u['username'],
+                                pct=pct, used=_fmt_bytes(used), quota=_fmt_bytes(quota)),
                                 cooldown=3600,
                             )
 
-                logger.debug("Трафик собран: %s (%d users)", srv.name, len(users))
+                logger.debug(t("sch.traffic_collected"), srv.name, len(users))
         except ApiError as e:
-            logger.warning("API ошибка сбора трафика [%s]: %s", srv.name, e)
+            logger.warning(t("sch.collect_api_err"), srv.name, e)
         except Exception as e:
-            logger.warning("Ошибка сбора трафика [%s]: %s", srv.name, e)
+            logger.warning(t("sch.collect_err"), srv.name, e)
 
 
 @safe_job("check_health")
@@ -174,14 +174,14 @@ async def _check_health():
             if prev and prev["status"] == "ok" and status != "ok":
                 await _fire_alert(
                     srv.name, "status_down",
-                    f"🔴 <b>{srv.name}</b> — статус изменился: <b>{status}</b>",
+                    t("sch.status_down", srv=srv.name, status=status),
                 )
 
             # Статус восстановился
             if prev and prev["status"] != "ok" and status == "ok":
                 await _fire_alert(
                     srv.name, "status_up",
-                    f"🟢 <b>{srv.name}</b> — статус восстановлен: <b>OK</b>",
+                    t("sch.status_up", srv=srv.name),
                     cooldown=0,
                 )
 
@@ -204,18 +204,18 @@ async def _check_health():
                 await _set_meta(srv.name, "ready_state", "1" if ready_flag else "0")
                 if prev_ready == "1" and not ready_flag:
                     human = {
-                        "admission_closed": "приём соединений закрыт",
-                        "no_healthy_upstreams": "нет здоровых upstream'ов",
+                        "admission_closed": t("sch.reason_admission"),
+                        "no_healthy_upstreams": t("sch.reason_upstreams"),
                     }.get(reason, reason or "not_ready")
                     await _fire_alert(
                         srv.name, "not_ready",
-                        f"⚠️ <b>{srv.name}</b> — не принимает новых клиентов: {human}",
+                        t("sch.not_ready", srv=srv.name, reason=human),
                         cooldown=300,
                     )
                 elif prev_ready == "0" and ready_flag:
                     await _fire_alert(
                         srv.name, "not_ready",
-                        f"🟢 <b>{srv.name}</b> — готовность восстановлена: принимает клиентов",
+                        t("sch.not_ready_ok", srv=srv.name),
                         cooldown=0,
                     )
 
@@ -225,8 +225,8 @@ async def _check_health():
                 if delta_pct > thr.conn_spike_pct:
                     await _fire_alert(
                         srv.name, "conn_spike",
-                        f"⚡ <b>{srv.name}</b> — всплеск соединений: "
-                        f"{prev['connections']:,} → {connections:,} (+{delta_pct:.0f}%)",
+                        t("sch.conn_spike", srv=srv.name,
+                        prev=prev['connections'], cur=connections, pct=delta_pct),
                     )
 
             # ME Writers coverage
@@ -236,7 +236,7 @@ async def _check_health():
                 if coverage < thr.writers_low_pct:
                     await _fire_alert(
                         srv.name, "writers_low",
-                        f"⚠️ <b>{srv.name}</b> — ME Writers coverage: {coverage:.0f}%",
+                        t("sch.writers_low", srv=srv.name, coverage=coverage),
                     )
             except Exception:
                 pass
@@ -251,8 +251,7 @@ async def _check_health():
                     if prev_version and prev_version != version:
                         await _fire_alert(
                             srv.name, "version_change",
-                            f"🏷 <b>{srv.name}</b> — обновление telemt: "
-                            f"<b>v{prev_version}</b> → <b>v{version}</b>",
+                            t("sch.version_new", srv=srv.name, old=prev_version, new=version),
                             cooldown=0,
                         )
             except Exception:
@@ -282,7 +281,7 @@ async def _check_health():
                     if d_sni > 0:
                         await _fire_alert(
                             srv.name, "bad_unknown_sni",
-                            f"⚠️ <b>{srv.name}</b> — неизвестный SNI: +{d_sni} за 2 мин",
+                            t("sch.bad_unknown_sni", srv=srv.name, n=d_sni),
                             cooldown=300,
                         )
 
@@ -290,7 +289,7 @@ async def _check_health():
                     if d_hs >= thr.hs_timeout_spike:
                         await _fire_alert(
                             srv.name, "hs_timeout_spike",
-                            f"⚠️ <b>{srv.name}</b> — всплеск handshake timeout: +{d_hs} за 2 мин",
+                            t("sch.hs_timeout", srv=srv.name, n=d_hs),
                             cooldown=120,
                         )
 
@@ -298,7 +297,7 @@ async def _check_health():
                     if d_bad >= thr.bad_client_spike:
                         await _fire_alert(
                             srv.name, "bad_client_spike",
-                            f"⚠️ <b>{srv.name}</b> — всплеск плохих TLS клиентов: +{d_bad} за 2 мин",
+                            t("sch.bad_client", srv=srv.name, n=d_bad),
                             cooldown=120,
                         )
 
@@ -306,7 +305,7 @@ async def _check_health():
                     if d_reset > 0:
                         await _fire_alert(
                             srv.name, "hs_conn_reset",
-                            f"⚠️ <b>{srv.name}</b> — сброс соединений при handshake: +{d_reset} за 2 мин",
+                            t("sch.hs_conn_reset", srv=srv.name, n=d_reset),
                             cooldown=300,
                         )
             except Exception:
@@ -318,16 +317,16 @@ async def _check_health():
                 await db.update_server_status(srv.name, "unreachable", 0)
                 await _fire_alert(
                     srv.name, "status_down",
-                    f"🔴 <b>{srv.name}</b> — сервер недоступен: {type(e).__name__}: {e}",
+                    t("sch.unreachable", srv=srv.name, err=f"{type(e).__name__}: {e}"),
                     cooldown=300,
                 )
-            logger.warning("Ошибка проверки [%s]: %s", srv.name, e)
+            logger.warning(t("sch.check_err"), srv.name, e)
 
 
 @safe_job("cleanup")
 async def _cleanup():
     await db.cleanup_old_data(days=30)
-    logger.info("Очистка старых данных выполнена")
+    logger.info(t("sch.cleanup_done"))
 
 
 # ─── Alert dispatcher ────────────────────────────────────────────────────────
@@ -348,9 +347,9 @@ async def _fire_alert(
             enabled = await db.get_alert(user_id, server_name, alert_type)
             if not enabled:
                 continue
-            await _bot.send_message(user_id, f"🚨 <b>Алерт</b>\n\n{message}")
+            await _bot.send_message(user_id, f"{t('sch.alert_header')}\n\n{message}")
         except Exception as e:
-            logger.warning("Не удалось отправить алерт user_id=%d: %s", user_id, e)
+            logger.warning(t("sch.alert_send_err"), user_id, e)
 
 
 # ─── Helpers ─────────────────────────────────────────────────────────────────

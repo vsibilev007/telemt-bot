@@ -5,6 +5,8 @@
 from aiogram.types import InlineKeyboardMarkup
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
+from i18n import t
+
 
 def _fmt_bytes_short(b: int) -> str:
     if not b:
@@ -40,34 +42,34 @@ def main_menu_kb(
     has_web = _version_tuple(telemt_version) >= WEB_PROXY_MIN_VERSION
 
     if status == "ok":
-        status_btn = "🟢 Состояние сервера"
+        status_btn = t("kb.main.status", icon="🟢")
     elif status == "unreachable":
-        status_btn = "🔴 Состояние сервера"
+        status_btn = t("kb.main.status", icon="🔴")
     else:
-        status_btn = "🟡 Состояние сервера"
+        status_btn = t("kb.main.status", icon="🟡")
 
     if lite:
         kb.button(text=status_btn,          callback_data="menu:dashboard")
-        kb.button(text="👥 Все клиенты",    callback_data="menu:users")
-        kb.button(text="➕ Новый клиент",    callback_data="user:create")
+        kb.button(text=t("kb.main.users"),    callback_data="menu:users")
+        kb.button(text=t("kb.main.new_client"),    callback_data="user:create")
         kb.button(text="⚡ Runtime",        callback_data="menu:runtime")
-        kb.button(text="📤 Бэкап",          callback_data="users:export_toml")
+        kb.button(text=t("kb.main.backup"),          callback_data="users:export_toml")
         schema_base = [1, 2, 2]
     else:
         kb.button(text=status_btn,              callback_data="menu:dashboard")
-        kb.button(text="📊 Отчёт по трафику",  callback_data="menu:traffic_report")
-        kb.button(text="👥 Все клиенты",        callback_data="menu:users")
-        kb.button(text="➕ Новый клиент",        callback_data="user:create")
+        kb.button(text=t("kb.main.traffic_report"),  callback_data="menu:traffic_report")
+        kb.button(text=t("kb.main.users"),        callback_data="menu:users")
+        kb.button(text=t("kb.main.new_client"),        callback_data="user:create")
         kb.button(text="⚡ Runtime",            callback_data="menu:runtime")
-        kb.button(text="⚠️ Истекающие",         callback_data="users:expiring_menu")
-        kb.button(text="🔒 Безопасность",       callback_data="menu:security")
+        kb.button(text=t("kb.main.expiring"),         callback_data="users:expiring_menu")
+        kb.button(text=t("kb.main.security"),       callback_data="menu:security")
         kb.button(text="🔗 Upstreams",          callback_data="menu:upstreams")
         kb.button(text="📡 DC / Writers",       callback_data="menu:dcs")
-        kb.button(text="📤 Бэкап",              callback_data="users:export_toml")
+        kb.button(text=t("kb.main.backup"),              callback_data="users:export_toml")
         if has_web:
             kb.button(text="🌐 WEB Proxy",      callback_data="menu:web")
-        kb.button(text="🔍 Проверить прокси",   callback_data="menu:proxy_check")
-        kb.button(text="⚙️ Конфиг",            callback_data="menu:config_edit")
+        kb.button(text=t("kb.main.proxy_check"),   callback_data="menu:proxy_check")
+        kb.button(text=t("kb.main.config"),            callback_data="menu:config_edit")
         # Схема зависит от количества кнопок (с WEB или без)
         schema_base = [2, 2, 2, 2, 2, 2, 1] if has_web else [2, 2, 2, 2, 2, 2]
 
@@ -97,16 +99,16 @@ def main_menu_kb(
 
 def sysinfo_kb() -> InlineKeyboardMarkup:
     kb = InlineKeyboardBuilder()
-    kb.button(text="🔄 Обновить", callback_data="sysinfo:refresh")
-    kb.button(text="◀️ Меню",     callback_data="menu:main")
+    kb.button(text=t("kb.common.refresh"), callback_data="sysinfo:refresh")
+    kb.button(text=t("kb.common.menu"),     callback_data="menu:main")
     kb.adjust(2)
     return kb.as_markup()
 
 
 def dashboard_kb() -> InlineKeyboardMarkup:
     kb = InlineKeyboardBuilder()
-    kb.button(text="🔄 Обновить", callback_data="dashboard:refresh")
-    kb.button(text="◀️ Меню",     callback_data="menu:main")
+    kb.button(text=t("kb.common.refresh"), callback_data="dashboard:refresh")
+    kb.button(text=t("kb.common.menu"),     callback_data="menu:main")
     kb.adjust(2)
     return kb.as_markup()
 
@@ -176,10 +178,10 @@ def users_list_kb(
 
     if sel_mode:
         n = len(selected)
-        kb.button(text=f"🔴 Откл ({n})",     callback_data="users:sel_do:disable")
-        kb.button(text=f"✅ Вкл ({n})",      callback_data="users:sel_do:enable")
-        kb.button(text=f"🗑 Удалить ({n})",  callback_data="users:sel_del:0")
-        kb.button(text="✔ Готово",           callback_data=f"users:sel_exit:{page}")
+        kb.button(text=t("kb.users.sel_disable", n=n),     callback_data="users:sel_do:disable")
+        kb.button(text=t("kb.users.sel_enable", n=n),      callback_data="users:sel_do:enable")
+        kb.button(text=t("kb.users.sel_delete", n=n),  callback_data="users:sel_del:0")
+        kb.button(text=t("kb.users.sel_done"),           callback_data=f"users:sel_exit:{page}")
         schema = [1] * len(page_users)
         if nav_count:
             schema.append(nav_count)
@@ -187,13 +189,13 @@ def users_list_kb(
         kb.adjust(*schema)
         return kb.as_markup()
 
-    kb.button(text="➕ Новый",        callback_data="user:create")
-    kb.button(text="➕➕ Массово",    callback_data="user:bulk")
-    kb.button(text="🔍 Поиск",       callback_data="users:search")
-    kb.button(text="🔄 Обновить",    callback_data="users:refresh")
-    kb.button(text="☑️ Выбрать",     callback_data=f"users:sel_enter:{page}")
-    kb.button(text="⚙️ Ещё",         callback_data="users:extra")
-    kb.button(text="◀ Назад в меню", callback_data="menu:main")
+    kb.button(text=t("kb.users.new"),        callback_data="user:create")
+    kb.button(text=t("kb.users.bulk"),    callback_data="user:bulk")
+    kb.button(text=t("kb.users.search"),       callback_data="users:search")
+    kb.button(text=t("kb.common.refresh"),    callback_data="users:refresh")
+    kb.button(text=t("kb.users.select"),     callback_data=f"users:sel_enter:{page}")
+    kb.button(text=t("kb.users.extra"),         callback_data="users:extra")
+    kb.button(text=t("kb.users.back_menu"), callback_data="menu:main")
 
     schema = [1] * len(page_users)
     if nav_count:
@@ -205,80 +207,80 @@ def users_list_kb(
 
 def users_sel_delete_confirm_kb(count: int) -> InlineKeyboardMarkup:
     kb = InlineKeyboardBuilder()
-    kb.button(text=f"🗑 Да, удалить ({count})", callback_data="users:sel_del:1")
-    kb.button(text="◀ Отмена", callback_data="users:sel_back:0")
+    kb.button(text=t("kb.users.sel_del_yes", count=count), callback_data="users:sel_del:1")
+    kb.button(text=t("kb.users.sel_cancel"), callback_data="users:sel_back:0")
     kb.adjust(2)
     return kb.as_markup()
 
 
 def user_detail_kb(username: str, enabled: bool = True) -> InlineKeyboardMarkup:
     kb = InlineKeyboardBuilder()
-    toggle_text   = "🟢 Вкл" if enabled else "🔴 Выкл"
+    toggle_text   = t("kb.user.enabled") if enabled else t("kb.user.disabled")
     toggle_action = "disable" if enabled else "enable"
-    kb.button(text="✏️ Редактировать",    callback_data=f"user:edit:{username}")
-    kb.button(text="🗑️ Удалить",          callback_data=f"user:delete_confirm:{username}")
+    kb.button(text=t("kb.user.edit"),    callback_data=f"user:edit:{username}")
+    kb.button(text=t("kb.user.delete"),          callback_data=f"user:delete_confirm:{username}")
     kb.button(text=toggle_text,            callback_data=f"user:toggle:{username}:{toggle_action}")
-    kb.button(text="🔗 Ссылки",           callback_data=f"user:links:{username}")
-    kb.button(text="🔄 Сменить секрет",   callback_data=f"user:rotate_secret:{username}")
-    kb.button(text="🔄 Сбросить квоту",   callback_data=f"user:reset_quota:{username}")
-    kb.button(text="📊 История трафика",  callback_data=f"user:traffic:{username}")
-    kb.button(text="🔄 Обновить",         callback_data=f"user:view:{username}")
-    kb.button(text="◀️ К списку",         callback_data="menu:users")
+    kb.button(text=t("kb.user.links"),           callback_data=f"user:links:{username}")
+    kb.button(text=t("kb.user.rotate"),   callback_data=f"user:rotate_secret:{username}")
+    kb.button(text=t("kb.user.reset_quota"),   callback_data=f"user:reset_quota:{username}")
+    kb.button(text=t("kb.user.traffic"),  callback_data=f"user:traffic:{username}")
+    kb.button(text=t("kb.common.refresh"),         callback_data=f"user:view:{username}")
+    kb.button(text=t("kb.user.to_list"),         callback_data="menu:users")
     kb.adjust(2, 1, 2, 1, 1, 1)
     return kb.as_markup()
 
 
 def user_delete_confirm_kb(username: str) -> InlineKeyboardMarkup:
     kb = InlineKeyboardBuilder()
-    kb.button(text="✅ Да, удалить", callback_data=f"user:delete:{username}")
-    kb.button(text="❌ Отмена",      callback_data=f"user:view:{username}")
+    kb.button(text=t("kb.user.del_yes"), callback_data=f"user:delete:{username}")
+    kb.button(text=t("kb.user.del_cancel"),      callback_data=f"user:view:{username}")
     kb.adjust(2)
     return kb.as_markup()
 
 
 def user_edit_kb(username: str) -> InlineKeyboardMarkup:
     kb = InlineKeyboardBuilder()
-    kb.button(text="🔑 Секрет",        callback_data=f"user:editfield:{username}:secret")
+    kb.button(text=t("kb.user.f_secret"),        callback_data=f"user:editfield:{username}:secret")
     kb.button(text="🔗 Max TCP",        callback_data=f"user:editfield:{username}:max_tcp_conns")
-    kb.button(text="📅 Срок действия", callback_data=f"user:editfield:{username}:expiration_rfc3339")
-    kb.button(text="💾 Квота",          callback_data=f"user:editfield:{username}:data_quota_bytes")
+    kb.button(text=t("kb.user.f_expiration"), callback_data=f"user:editfield:{username}:expiration_rfc3339")
+    kb.button(text=t("kb.user.f_quota"),          callback_data=f"user:editfield:{username}:data_quota_bytes")
     kb.button(text="🌐 Max IP",         callback_data=f"user:editfield:{username}:max_unique_ips")
-    kb.button(text="⬆️ Лимит upload",  callback_data=f"user:editfield:{username}:rate_limit_up_bps")
-    kb.button(text="⬇️ Лимит download",callback_data=f"user:editfield:{username}:rate_limit_down_bps")
-    kb.button(text="◀️ Назад",          callback_data=f"user:view:{username}")
+    kb.button(text=t("kb.user.f_up"),  callback_data=f"user:editfield:{username}:rate_limit_up_bps")
+    kb.button(text=t("kb.user.f_down"),callback_data=f"user:editfield:{username}:rate_limit_down_bps")
+    kb.button(text=t("kb.common.back"),          callback_data=f"user:view:{username}")
     kb.adjust(2, 2, 2, 1, 1)
     return kb.as_markup()
 
 
 def user_links_kb(username: str) -> InlineKeyboardMarkup:
     kb = InlineKeyboardBuilder()
-    kb.button(text="◀️ Назад", callback_data=f"user:view:{username}")
+    kb.button(text=t("kb.common.back"), callback_data=f"user:view:{username}")
     return kb.as_markup()
 
 
 def users_extra_kb() -> InlineKeyboardMarkup:
     kb = InlineKeyboardBuilder()
-    kb.button(text="⏰ Истекающие",        callback_data="users:expiring")
-    kb.button(text="📊 Квоты",             callback_data="users:quota")
-    kb.button(text="🌐 Активные IP",       callback_data="users:active_ips")
-    kb.button(text="🧹 Удалить истёкших",  callback_data="users:delete_expired_confirm")
-    kb.button(text="◀️ К списку",          callback_data="menu:users")
+    kb.button(text=t("kb.extra.expiring"),        callback_data="users:expiring")
+    kb.button(text=t("kb.extra.quota"),             callback_data="users:quota")
+    kb.button(text=t("kb.extra.active_ips"),       callback_data="users:active_ips")
+    kb.button(text=t("kb.extra.delete_expired"),  callback_data="users:delete_expired_confirm")
+    kb.button(text=t("kb.user.to_list"),          callback_data="menu:users")
     kb.adjust(2, 2, 1)
     return kb.as_markup()
 
 
 def users_active_ips_kb() -> InlineKeyboardMarkup:
     kb = InlineKeyboardBuilder()
-    kb.button(text="🔄 Обновить", callback_data="users:active_ips")
-    kb.button(text="◀️ Ещё", callback_data="users:extra")
+    kb.button(text=t("kb.common.refresh"), callback_data="users:active_ips")
+    kb.button(text=t("kb.extra.more"), callback_data="users:extra")
     kb.adjust(2)
     return kb.as_markup()
 
 
 def users_delete_expired_confirm_kb() -> InlineKeyboardMarkup:
     kb = InlineKeyboardBuilder()
-    kb.button(text="✅ Да, удалить", callback_data="users:delete_expired")
-    kb.button(text="❌ Отмена",      callback_data="users:extra")
+    kb.button(text=t("kb.user.del_yes"), callback_data="users:delete_expired")
+    kb.button(text=t("kb.user.del_cancel"),      callback_data="users:extra")
     kb.adjust(2)
     return kb.as_markup()
 
@@ -287,7 +289,7 @@ def export_menu_kb() -> InlineKeyboardMarkup:
     kb = InlineKeyboardBuilder()
     kb.button(text="📤 CSV",   callback_data="users:export:csv")
     kb.button(text="📊 Excel", callback_data="users:export:xlsx")
-    kb.button(text="◀️ Меню",  callback_data="menu:main")
+    kb.button(text=t("kb.common.menu"),  callback_data="menu:main")
     kb.adjust(2, 1)
     return kb.as_markup()
 
@@ -296,17 +298,17 @@ def traffic_period_kb(username: str, days: int = 7, chart_mode: bool = False) ->
     kb = InlineKeyboardBuilder()
     if chart_mode:
         # Под графиком: кнопки периода строят новый график
-        for d, label in [(1, "24ч"), (7, "7 дней"), (14, "14 дней"), (30, "30 дней")]:
+        for d, label in [(1, t("kb.tp.d1")), (7, t("kb.tp.d7")), (14, t("kb.tp.d14")), (30, t("kb.tp.d30"))]:
             kb.button(text=label, callback_data=f"user:traffic_chart:{username}:{d}")
-        kb.button(text="📋 Текстовый отчёт", callback_data=f"user:traffic_period:{username}:{days}")
-        kb.button(text="◀️ Назад",            callback_data=f"user:view:{username}")
+        kb.button(text=t("kb.tp.text"), callback_data=f"user:traffic_period:{username}:{days}")
+        kb.button(text=t("kb.common.back"),            callback_data=f"user:view:{username}")
         kb.adjust(4, 1, 1)
     else:
         # Под текстом: кнопки периода строят текстовый отчёт
-        for d, label in [(1, "24ч"), (7, "7 дней"), (14, "14 дней"), (30, "30 дней")]:
+        for d, label in [(1, t("kb.tp.d1")), (7, t("kb.tp.d7")), (14, t("kb.tp.d14")), (30, t("kb.tp.d30"))]:
             kb.button(text=label, callback_data=f"user:traffic_period:{username}:{d}")
-        kb.button(text="📈 График", callback_data=f"user:traffic_chart:{username}:{days}")
-        kb.button(text="◀️ Назад",  callback_data=f"user:view:{username}")
+        kb.button(text=t("kb.tp.chart"), callback_data=f"user:traffic_chart:{username}:{days}")
+        kb.button(text=t("kb.common.back"),  callback_data=f"user:view:{username}")
         kb.adjust(4, 1, 1)
     return kb.as_markup()
 
@@ -315,18 +317,18 @@ def traffic_report_kb(chart_mode: bool = False) -> InlineKeyboardMarkup:
     kb = InlineKeyboardBuilder()
     if chart_mode:
         # Под графиком: кнопки периода строят новый график
-        for days, label in [(1, "24ч"), (7, "7 дней"), (30, "30 дней")]:
+        for days, label in [(1, t("kb.tp.d1")), (7, t("kb.tp.d7")), (30, t("kb.tp.d30"))]:
             kb.button(text=label, callback_data=f"traffic_report_chart:{days}")
-        kb.button(text="📋 Текстовый отчёт", callback_data="traffic_report:7")
-        kb.button(text="◀️ Меню",             callback_data="menu:main")
+        kb.button(text=t("kb.tp.text"), callback_data="traffic_report:7")
+        kb.button(text=t("kb.common.menu"),             callback_data="menu:main")
         kb.adjust(3, 1, 1)
     else:
         # Под текстом: кнопки периода строят текстовый отчёт
-        for days, label in [(1, "24ч"), (7, "7 дней"), (30, "30 дней")]:
+        for days, label in [(1, t("kb.tp.d1")), (7, t("kb.tp.d7")), (30, t("kb.tp.d30"))]:
             kb.button(text=label, callback_data=f"traffic_report:{days}")
-        kb.button(text="📈 График топ-15", callback_data="traffic_report_chart:7")
-        kb.button(text="🔄 Обновить",      callback_data="traffic_report:7")
-        kb.button(text="◀️ Меню",          callback_data="menu:main")
+        kb.button(text=t("kb.tp.chart_top"), callback_data="traffic_report_chart:7")
+        kb.button(text=t("kb.common.refresh"),      callback_data="traffic_report:7")
+        kb.button(text=t("kb.common.menu"),          callback_data="menu:main")
         kb.adjust(3, 1, 1, 1)
     return kb.as_markup()
 
@@ -334,27 +336,27 @@ def traffic_report_kb(chart_mode: bool = False) -> InlineKeyboardMarkup:
 # Единый источник типов алертов: используется и в /alerts (handlers),
 # и в клавиатуре — расхождение ломает отрисовку тумблеров.
 ALERT_LABELS = {
-    "status_down":      "Падение сервера",
-    "status_up":        "Восстановление",
-    "not_ready":        "Готовность (admission/upstreams)",
-    "conn_spike":       "Всплеск соединений",
-    "writers_low":      "Writers coverage",
-    "version_change":   "Обновление версии",
-    "bad_unknown_sni":  "Неизвестный SNI",
-    "hs_timeout_spike": "Всплеск HS timeout",
-    "bad_client_spike": "Всплеск плохих TLS",
-    "hs_conn_reset":    "Сброс при handshake",
-    "quota_warn":       "Превышение квоты",
+    "status_down": "kb.alert.status_down",
+    "status_up": "kb.alert.status_up",
+    "not_ready": "kb.alert.not_ready",
+    "conn_spike": "kb.alert.conn_spike",
+    "writers_low": "kb.alert.writers_low",
+    "version_change": "kb.alert.version_change",
+    "bad_unknown_sni": "kb.alert.bad_unknown_sni",
+    "hs_timeout_spike": "kb.alert.hs_timeout_spike",
+    "bad_client_spike": "kb.alert.bad_client_spike",
+    "hs_conn_reset": "kb.alert.hs_conn_reset",
+    "quota_warn": "kb.alert.quota_warn",
 }
 
 
 def alerts_kb(states: dict[str, bool] | None = None) -> InlineKeyboardMarkup:
     states = states or {}
     kb = InlineKeyboardBuilder()
-    for atype, alabel in ALERT_LABELS.items():
+    for atype, alert_key in ALERT_LABELS.items():
         mark = "✅" if states.get(atype, False) else "☑️"
-        kb.button(text=f"{mark} {alabel}", callback_data=f"alert:toggle:{atype}")
-    kb.button(text="◀ Меню", callback_data="menu:main")
+        kb.button(text=f"{mark} {t(alert_key)}", callback_data=f"alert:toggle:{atype}")
+    kb.button(text=t("common.back_menu"), callback_data="menu:main")
     kb.adjust(1)
     return kb.as_markup()
 
@@ -376,14 +378,14 @@ def runtime_kb() -> InlineKeyboardMarkup:
     kb.button(text="📋 Events",           callback_data="runtime:events")
     kb.button(text="👥 Connections",      callback_data="runtime:connections")
     kb.button(text="🔍 TLS Fingerprints", callback_data="runtime:tls_fingerprints")
-    kb.button(text="◀️ Меню",             callback_data="menu:main")
+    kb.button(text=t("kb.common.menu"),             callback_data="menu:main")
     kb.adjust(2, 2, 2, 2, 2, 2, 1, 1)
     return kb.as_markup()
 
 
 def runtime_sub_kb(section: str) -> InlineKeyboardMarkup:
     kb = InlineKeyboardBuilder()
-    kb.button(text="🔄 Обновить", callback_data=f"runtime:{section}")
+    kb.button(text=t("kb.common.refresh"), callback_data=f"runtime:{section}")
     kb.button(text="◀️ Runtime",  callback_data="menu:runtime")
     kb.adjust(2)
     return kb.as_markup()
@@ -393,24 +395,24 @@ def security_kb() -> InlineKeyboardMarkup:
     kb = InlineKeyboardBuilder()
     kb.button(text="🛡️ Posture",   callback_data="security:posture")
     kb.button(text="📋 Whitelist", callback_data="security:whitelist")
-    kb.button(text="⚙️ Лимиты",   callback_data="security:limits")
-    kb.button(text="◀️ Меню",     callback_data="menu:main")
+    kb.button(text=t("kb.security.limits"),   callback_data="security:limits")
+    kb.button(text=t("kb.common.menu"),     callback_data="menu:main")
     kb.adjust(2, 1, 1)
     return kb.as_markup()
 
 
 def security_sub_kb(section: str) -> InlineKeyboardMarkup:
     kb = InlineKeyboardBuilder()
-    kb.button(text="🔄 Обновить",     callback_data=f"security:{section}")
-    kb.button(text="◀️ Безопасность", callback_data="menu:security")
+    kb.button(text=t("kb.common.refresh"),     callback_data=f"security:{section}")
+    kb.button(text=t("kb.security.back"), callback_data="menu:security")
     kb.adjust(2)
     return kb.as_markup()
 
 
 def upstreams_kb() -> InlineKeyboardMarkup:
     kb = InlineKeyboardBuilder()
-    kb.button(text="🔄 Обновить", callback_data="upstreams:refresh")
-    kb.button(text="◀️ Меню",     callback_data="menu:main")
+    kb.button(text=t("kb.common.refresh"), callback_data="upstreams:refresh")
+    kb.button(text=t("kb.common.menu"),     callback_data="menu:main")
     kb.adjust(2)
     return kb.as_markup()
 
@@ -419,14 +421,14 @@ def dcs_kb() -> InlineKeyboardMarkup:
     kb = InlineKeyboardBuilder()
     kb.button(text="📡 DC Status",  callback_data="dcs:status")
     kb.button(text="✍️ ME Writers", callback_data="dcs:writers")
-    kb.button(text="◀️ Меню",      callback_data="menu:main")
+    kb.button(text=t("kb.common.menu"),      callback_data="menu:main")
     kb.adjust(2, 1)
     return kb.as_markup()
 
 
 def dcs_sub_kb(section: str) -> InlineKeyboardMarkup:
     kb = InlineKeyboardBuilder()
-    kb.button(text="🔄 Обновить",     callback_data=f"dcs:{section}")
+    kb.button(text=t("kb.common.refresh"),     callback_data=f"dcs:{section}")
     kb.button(text="◀️ DC / Writers", callback_data="menu:dcs")
     kb.adjust(2)
     return kb.as_markup()
@@ -434,8 +436,8 @@ def dcs_sub_kb(section: str) -> InlineKeyboardMarkup:
 
 def proxy_check_kb() -> InlineKeyboardMarkup:
     kb = InlineKeyboardBuilder()
-    kb.button(text="🔍 Проверить ещё", callback_data="proxy:check_again")
-    kb.button(text="◀️ Меню",          callback_data="menu:main")
+    kb.button(text=t("kb.proxy.again"), callback_data="proxy:check_again")
+    kb.button(text=t("kb.common.menu"),          callback_data="menu:main")
     kb.adjust(1)
     return kb.as_markup()
 
@@ -461,7 +463,7 @@ def config_edit_sections_kb(telemt_version: str = "") -> InlineKeyboardMarkup:
     # WEB секция только для Telemt 3.5.5+
     if _version_tuple(telemt_version) >= WEB_PROXY_MIN_VERSION:
         kb.button(text=CONFIG_SECTIONS_WEB[1], callback_data=f"configedit:section:{CONFIG_SECTIONS_WEB[0]}")
-    kb.button(text="◀️ Меню", callback_data="menu:main")
+    kb.button(text=t("kb.common.menu"), callback_data="menu:main")
     kb.adjust(2)
     return kb.as_markup()
 
@@ -485,12 +487,12 @@ def config_edit_fields_kb(
         if len(label) > 40:
             label = label[:37] + "..."
         kb.button(text=label, callback_data=f"configedit:field:{section}:{field}")
-    kb.button(text="💾 Применить", callback_data=f"configedit:apply:{section}")
+    kb.button(text=t("kb.cfg.apply"), callback_data=f"configedit:apply:{section}")
     if supports_reload:
-        kb.button(text="⚡ +instant", callback_data=f"configedit:apply:instant:{section}")
-        kb.button(text="🌙 +drain",   callback_data=f"configedit:apply:drain:{section}")
-    kb.button(text="◀️ Назад",     callback_data="configedit:menu")
-    kb.button(text="◀️ Меню",      callback_data="menu:main")
+        kb.button(text=t("kb.cfg.instant"), callback_data=f"configedit:apply:instant:{section}")
+        kb.button(text=t("kb.cfg.drain"),   callback_data=f"configedit:apply:drain:{section}")
+    kb.button(text=t("kb.common.back"),     callback_data="configedit:menu")
+    kb.button(text=t("kb.common.menu"),      callback_data="menu:main")
     n = len(fields)
     if supports_reload:
         kb.adjust(*([1] * n) + [3, 2])
@@ -503,10 +505,10 @@ def config_edit_after_kb(section: str, needs_reload: bool = False) -> InlineKeyb
     """Клавиатура после применения секции: предлагает reload, если он нужен."""
     kb = InlineKeyboardBuilder()
     if needs_reload:
-        kb.button(text="⚡ Reload instant", callback_data=f"configedit:reload:instant:{section}")
-        kb.button(text="🌙 Reload drain",   callback_data=f"configedit:reload:drain:{section}")
+        kb.button(text=t("kb.cfg.reload_instant"), callback_data=f"configedit:reload:instant:{section}")
+        kb.button(text=t("kb.cfg.reload_drain"),   callback_data=f"configedit:reload:drain:{section}")
         kb.adjust(2)
-    kb.button(text="◀️ К секции", callback_data=f"configedit:confirm:{section}")
+    kb.button(text=t("kb.cfg.to_section"), callback_data=f"configedit:confirm:{section}")
     return kb.as_markup()
 
 
@@ -519,19 +521,19 @@ def export_toml_kb() -> InlineKeyboardMarkup:
 
 def web_menu_kb(op_state: str = "running") -> InlineKeyboardMarkup:
     kb = InlineKeyboardBuilder()
-    kb.button(text="📊 Статус",           callback_data="web:status")
-    kb.button(text="👥 Сессии",           callback_data="web:sessions")
+    kb.button(text=t("kb.web.status"),           callback_data="web:status")
+    kb.button(text=t("kb.web.sessions"),           callback_data="web:sessions")
     # Lifecycle buttons depend on current state
     if op_state == "running":
-        kb.button(text="⏸ Пауза",        callback_data="web:pause")
+        kb.button(text=t("kb.web.pause"),        callback_data="web:pause")
         kb.button(text="🔄 Drain",        callback_data="web:drain")
     elif op_state == "paused":
         kb.button(text="▶️ Resume",       callback_data="web:resume")
     elif op_state in ("draining", "force_closing"):
         kb.button(text="▶️ Resume",       callback_data="web:resume")
-    kb.button(text="🧹 Очистить debug",   callback_data="web:debug_clear")
-    kb.button(text="🔄 Сброс learning",   callback_data="web:carrier_reset")
-    kb.button(text="◀️ Меню",             callback_data="menu:main")
+    kb.button(text=t("kb.web.debug_clear"),   callback_data="web:debug_clear")
+    kb.button(text=t("kb.web.carrier_reset"),   callback_data="web:carrier_reset")
+    kb.button(text=t("kb.common.menu"),             callback_data="menu:main")
     n = 2 + (2 if op_state == "running" else (1 if op_state in ("paused", "draining", "force_closing") else 0)) + 2 + 1
     schema = []
     remaining = n
@@ -557,7 +559,7 @@ def web_sessions_kb(sessions: list, has_next: bool = False, next_cursor: str = "
         kb.button(text=f"{icon} {user} ({short_id[-8:]})", callback_data=f"web:s:{short_id}")
     if has_next and next_cursor:
         # Сокращаем cursor до 32 символов
-        kb.button(text="▶️ Ещё", callback_data=f"web:n:{next_cursor[:32]}")
+        kb.button(text=t("kb.web.more"), callback_data=f"web:n:{next_cursor[:32]}")
     kb.button(text="◀️ WEB", callback_data="menu:web")
     n = min(len(sessions), 10)
     kb.adjust(*([1] * n + ([1] if has_next else []) + [1]))
@@ -568,8 +570,8 @@ def web_session_detail_kb(session_ref: str) -> InlineKeyboardMarkup:
     kb = InlineKeyboardBuilder()
     # Используем только последнюю часть ID
     short_id = session_ref.split(".")[-1] if "." in session_ref else session_ref
-    kb.button(text="🚫 Закрыть", callback_data=f"web:c:{short_id}")
-    kb.button(text="◀️ Сессии", callback_data="web:sessions")
+    kb.button(text=t("kb.web.close"), callback_data=f"web:c:{short_id}")
+    kb.button(text=t("kb.web.back_sessions"), callback_data="web:sessions")
     kb.button(text="◀️ WEB",    callback_data="menu:web")
     kb.adjust(1, 2)
     return kb.as_markup()

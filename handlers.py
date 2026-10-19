@@ -26,6 +26,7 @@ _NO_LINK_PREVIEW = LinkPreviewOptions(is_disabled=True)
 from api_client import ApiError, TelemetClient, cluster_write, cluster_read, cluster_users_with_nodes, NodeResult
 from config import Config
 import database as db
+from i18n import t
 from export_utils import users_to_csv, users_to_xlsx
 from formatters import (
     format_connections, format_dashboard, format_dcs,
@@ -113,7 +114,7 @@ async def _cluster_section(
                 data = await method(*args)
                 return node_srv.name, True, formatter(data)
             except Exception as e:
-                return node_srv.name, False, f"🔴 Ошибка: {str(e)[:80]}"
+                return node_srv.name, False, t("h.cluster.node_err", err=str(e)[:80])
 
         results = await asyncio.gather(*[_get_node(m) for m in members])
         sep = "─" * 28
@@ -141,7 +142,7 @@ def _uid(event) -> int:
 async def _lite_blocked(message: Message, config: Config) -> bool:
     """True, если команда отключена в lite-режиме (ответ уже отправлен)."""
     if config.lite_mode:
-        await message.answer("⛔ Команда недоступна в lite-режиме (LITE_MODE=true)")
+        await message.answer(t("h.lite_blocked"))
         return True
     return False
 
@@ -237,17 +238,9 @@ async def cmd_start(message: Message, config: Config):
     idx = await get_server_index(uid, config)
     srv = config.servers[idx]
     status, conns = await _get_menu_state(uid, config)
-    name = message.from_user.first_name or "друг"
+    name = message.from_user.first_name or t("h.common.default_name")
     await message.answer(
-        f"👋 <b>Привет, {name}!</b>\n\n"
-        f"Это бот управления <b>Telemt MTProxy</b>.\n\n"
-        f"<b>Основные команды:</b>\n"
-        f"  /menu — главное меню\n"
-        f"  /adduser имя [дней] — быстро создать клиента\n"
-        f"  /find запрос — поиск клиента по имени\n"
-        f"  /alerts — управление алертами\n"
-        f"  /alert_log — история последних алертов\n\n"
-        f"<i>Выберите действие в меню ниже 👇</i>",
+        t("h.start.hello", name=name),
         reply_markup=ReplyKeyboardRemove(),
     )
     client, _ = await get_client(uid, config)
@@ -313,10 +306,10 @@ async def cb_server_select(cq: CallbackQuery, config: Config):
     try:
         idx = int(cq.data.split(":")[-1])
     except (ValueError, IndexError):
-        await cq.answer("❌ Неверный индекс", show_alert=True)
+        await cq.answer(t("h.server.bad_index"), show_alert=True)
         return
     if idx < 0 or idx >= len(config.servers):
-        await cq.answer("❌ Сервер не найден", show_alert=True)
+        await cq.answer(t("h.server.not_found"), show_alert=True)
         return
     await set_server_index(_uid(cq), idx)
     srv = config.servers[idx]
@@ -334,7 +327,7 @@ async def cb_server_select(cq: CallbackQuery, config: Config):
 # ─── System info ──────────────────────────────────────────────────────────────
 
 async def _show_sysinfo(cq: CallbackQuery, config: Config):
-    await cq.answer("⏳ Собираю данные...")
+    await cq.answer(t("h.common.gathering"))
     client, srv = await get_client(_uid(cq), config)
 
     # Параллельно: системная инфа + состояние telemt
@@ -356,7 +349,7 @@ async def _show_sysinfo(cq: CallbackQuery, config: Config):
         telemt_conns = summary.get("connections_total", 0) if not isinstance(summary, Exception) else 0
 
     text = (
-        f"🖥 <b>Состояние сервера — {srv.name}</b>\n\n"
+        t("h.sysinfo.title", srv=srv.name)
         + format_system_status(info, telemt_status, telemt_conns)
     )
     await _safe_edit(cq, text, reply_markup=sysinfo_kb())
@@ -392,12 +385,12 @@ async def _show_dashboard(cq: CallbackQuery, config: Config):
                     health, summary, sysinfo, gates, node_srv.name, online
                 )
             except Exception as e:
-                return node_srv.name, False, f"🔴 <b>{node_srv.name}</b> — недоступен: {e}"
+                return node_srv.name, False, t("h.cluster.unreachable", srv=node_srv.name, err=e)
 
         results = await asyncio.gather(*[_get_node_data(m) for m in members])
 
         # Собираем общий дашборд кластера
-        lines = [f"⚙️ <b>Кластер: {srv.group}</b>\n"]
+        lines = [t("h.cluster.title", group=srv.group)]
         for name, ok, text in results:
             lines.append(f"{'─' * 30}")
             lines.append(text)
@@ -438,7 +431,7 @@ async def cb_dashboard(cq: CallbackQuery, config: Config):
 async def cb_traffic_report_menu(cq: CallbackQuery):
     await _safe_edit(
         cq,
-        "📊 <b>Отчёт по трафику</b>\n\nВыберите период:",
+        t("h.tr.menu"),
         reply_markup=traffic_report_kb(),
     )
 
@@ -447,7 +440,7 @@ async def cb_traffic_report_menu(cq: CallbackQuery):
 async def cb_traffic_report(cq: CallbackQuery, config: Config):
     days = int(cq.data.split(":")[-1])
     client, srv = await get_client(_uid(cq), config)
-    await cq.answer("⏳ Считаю...")
+    await cq.answer(t("h.common.counting"))
     users_task = client.get_users()
     deltas_task = db.get_all_users_traffic_delta(srv.name, days=days)
     try:
@@ -463,9 +456,9 @@ async def cb_traffic_report(cq: CallbackQuery, config: Config):
     active = sum(1 for u in users if u.get("current_connections", 0) > 0)
 
     lines = [
-        f"📊 <b>Отчёт по трафику — {srv.group if srv.group else srv.name}</b>",
-        f"<i>Период: {days} дн  |  {len(users)} клиентов  |  {active} онлайн</i>",
-        f"<b>Всего за период: {fmt_bytes(total_delta)}</b>",
+        t("h.tr.title", srv=(srv.group or srv.name)),
+        t("h.tr.sub", days=days, users=len(users), active=active),
+        t("h.tr.total", total=fmt_bytes(total_delta)),
         "",
     ]
 
@@ -482,16 +475,16 @@ async def cb_traffic_report(cq: CallbackQuery, config: Config):
             try:
                 exp_dt = datetime.fromisoformat(exp.replace("Z", "+00:00"))
                 if exp_dt < datetime.now(timezone.utc):
-                    exp_str = " 🔴истёк"
+                    exp_str = t("h.tr.expired_tag")
                 elif exp_dt < datetime.now(timezone.utc) + timedelta(days=7):
-                    exp_str = " ⚠️скоро"
+                    exp_str = t("h.tr.soon_tag")
             except Exception:
                 pass
         lines.append(f"{icon} <code>{name}</code>{exp_str}")
-        lines.append(f"   За период: <b>{d_str}</b>  |  Всего: {total}  |  {conns}🔌")
+        lines.append(t("h.tr.row", period=d_str, total=total, conns=conns))
 
     if len(sorted_users) > 20:
-        lines.append(f"\n<i>...и ещё {len(sorted_users) - 20} клиентов</i>")
+        lines.append(t("h.tr.more", n=len(sorted_users) - 20))
 
     text = "\n".join(lines)
     kb = traffic_report_kb(chart_mode=False)
@@ -519,7 +512,7 @@ async def _show_users(cq: CallbackQuery, config: Config, page: int = 0):
 
     active = sum(1 for u in users if u.get("current_connections", 0) > 0)
     cluster_hint = f" ⚙️ {srv.group}" if config.is_cluster(srv) else ""
-    header = f"<b>👥 Клиенты{cluster_hint}</b>  {active} онлайн / {len(users)} всего"
+    header = t("h.users.header", hint=cluster_hint, active=active, total=len(users))
     await _safe_edit(cq, header, reply_markup=users_list_kb(users, page, config=config, cluster=config.is_cluster(srv)))
 
 
@@ -533,7 +526,7 @@ async def cb_users_page(cq: CallbackQuery, config: Config):
     try:
         page = int(cq.data.split(":")[-1])
     except (ValueError, IndexError):
-        await cq.answer("❌ Неверная страница", show_alert=True)
+        await cq.answer(t("h.users.bad_page"), show_alert=True)
         return
     # В режиме выбора листаем сохранённый список, не запрашивая API заново
     if _uid(cq) in _users_selection:
@@ -558,7 +551,7 @@ _users_selection: dict[int, dict] = {}
 def _sel_names(selected: set) -> str:
     names = sorted(selected)
     shown = ", ".join(f"<code>{n}</code>" for n in names[:15])
-    return shown + (f" …ещё {len(names) - 15}" if len(names) > 15 else "")
+    return shown + (t("h.common.more", n=len(names) - 15) if len(names) > 15 else "")
 
 
 async def _show_users_sel(cq: CallbackQuery, config: Config, page: int = 0):
@@ -569,8 +562,8 @@ async def _show_users_sel(cq: CallbackQuery, config: Config, page: int = 0):
         return
     st["page"] = page
     header = (
-        f"<b>☑️ Выбрано {len(st['selected'])}</b> из {len(st['users'])}\n"
-        f"Отмечено: {_sel_names(st['selected']) or '—'}"
+        t("h.users.sel_header", n=len(st['selected']), total=len(st['users']),
+          names=(_sel_names(st['selected']) or "—"))
     )
     await _safe_edit(
         cq, header,
@@ -606,7 +599,7 @@ async def cb_users_sel_enter(cq: CallbackQuery, config: Config):
     """Вход в режим выбора: загружаем список и запоминаем выбор."""
     users, srv, members = await _fetch_users(_uid(cq), config)
     if users is None:
-        await cq.answer("❌ Не удалось получить список", show_alert=True)
+        await cq.answer(t("h.common.fetch_failed"), show_alert=True)
         return
     try:
         page = max(0, int(cq.data.split(":")[-1]))
@@ -653,7 +646,7 @@ async def _send_fresh_users_list(cq: CallbackQuery, config: Config):
         return
     active = sum(1 for u in users if u.get("current_connections", 0) > 0)
     await cq.message.answer(
-        f"<b>👥 Клиенты</b>  {active} онлайн / {len(users)} всего",
+        t("h.users.header", hint="", active=active, total=len(users)),
         reply_markup=users_list_kb(users, 0, config=config),
     )
 
@@ -664,13 +657,13 @@ async def cb_users_sel_do(cq: CallbackQuery, config: Config):
     action = cq.data.split(":")[-1]
     st = _users_selection.get(_uid(cq))
     if not st or not st["selected"]:
-        await cq.answer("❌ Никто не выбран", show_alert=True)
+        await cq.answer(t("h.bulk.nobody"), show_alert=True)
         return
     names = sorted(st["selected"])
     _, srv, members = await _fetch_users(_uid(cq), config)
 
     method = "enable_user" if action == "enable" else "disable_user"
-    await cq.answer(f"⏳ {action}: {len(names)} юзеров…")
+    await cq.answer(t("h.bulk.start_enable" if action == "enable" else "h.bulk.start_disable", n=len(names)))
 
     # Последовательно: API сервера сериализует мутации одним локом
     report: list[str] = []
@@ -684,9 +677,9 @@ async def cb_users_sel_do(cq: CallbackQuery, config: Config):
             report.append(f"❌ {name}: {_format_cluster_result([r for r in results if not r.ok])[:120]}")
 
     icon = "🟢" if action == "enable" else "🔴"
-    verb = "Включены" if action == "enable" else "Отключены"
-    text = f"{icon} <b>{verb}: {len(names) - failed} из {len(names)}</b>\n\n"
-    text += "\n".join(report[:30]) + (f"\n…ещё {len(report) - 30}" if len(report) > 30 else "")
+    verb = t("h.bulk.enabled_many") if action == "enable" else t("h.bulk.disabled_many")
+    text = t("h.bulk.result_header", icon=icon, verb=verb, ok=len(names) - failed, total=len(names)) + "\n\n"
+    text += "\n".join(report[:30]) + (t("h.common.more_nl", n=len(report) - 30) if len(report) > 30 else "")
 
     _users_selection.pop(_uid(cq), None)
     await _safe_edit(cq, text)
@@ -699,21 +692,21 @@ async def cb_users_sel_del(cq: CallbackQuery, config: Config):
     stage = cq.data.split(":")[-1]
     st = _users_selection.get(_uid(cq))
     if not st or not st["selected"]:
-        await cq.answer("❌ Никто не выбран", show_alert=True)
+        await cq.answer(t("h.bulk.nobody"), show_alert=True)
         return
 
     if stage != "1":
         await _safe_edit(
             cq,
-            f"⚠️ <b>Удалить {len(st['selected'])} юзеров?</b>\n\n"
+            t("h.bulk.del_confirm", n=len(st['selected'])) + "\n\n"
             f"{_sel_names(st['selected'])}\n\n"
-            "Действие необратимо. WEB-профили будут сняты автоматически.",
+            + t("h.bulk.irreversible"),
             reply_markup=users_sel_delete_confirm_kb(len(st["selected"])),
         )
         return
 
     names = sorted(st["selected"])
-    await cq.answer(f"⏳ Удаляю {len(names)}…")
+    await cq.answer(t("h.bulk.deleting", n=len(names)))
     _, srv, members = await _fetch_users(_uid(cq), config)
 
     # Сначала снимаем WEB-профили на всех узлах (иначе API отклонит удаление)
@@ -733,10 +726,10 @@ async def cb_users_sel_del(cq: CallbackQuery, config: Config):
             failed += 1
             report.append(f"❌ {name}: {_format_cluster_result([r for r in results if not r.ok])[:120]}")
 
-    text = f"🗑 <b>Удалены: {len(names) - failed} из {len(names)}</b>\n\n"
+    text = t("h.bulk.deleted_header", ok=len(names) - failed, total=len(names)) + "\n\n"
     text += "\n".join(report[:30]) + (f"\n…ещё {len(report) - 30}" if len(report) > 30 else "")
     if failed:
-        text += f"\n\n⚠️ Не удалены: {failed} (последний юзер или висящий профиль)"
+        text += t("h.bulk.not_deleted", n=failed)
 
     _users_selection.pop(_uid(cq), None)
     await _safe_edit(cq, text)
@@ -749,7 +742,7 @@ async def cb_users_sel_del(cq: CallbackQuery, config: Config):
 async def cb_users_search(cq: CallbackQuery, state: FSMContext):
     await state.set_state(SearchUserFSM.waiting_query)
     await cq.answer()
-    await cq.message.answer("🔍 Введите имя или часть имени клиента:")
+    await cq.message.answer(t("h.search.prompt"))
 
 
 @router.callback_query(F.data == "users:quota")
@@ -767,7 +760,7 @@ async def cb_users_quota(cq: CallbackQuery, config: Config):
                 return node_srv.name, True, format_users_quota(data)
             except ApiError as e:
                 if e.status == 404:
-                    return node_srv.name, False, "⚠️ Требуется Telemt 3.4.12+"
+                    return node_srv.name, False, t("h.quota.old_api")
                 return node_srv.name, False, f"❌ {e.message}"
 
         results = await asyncio.gather(*[_get_quota(m) for m in members])
@@ -777,7 +770,7 @@ async def cb_users_quota(cq: CallbackQuery, config: Config):
             lines += [f"<b>⚙️ {name}</b>", sep, text, ""]
         from aiogram.utils.keyboard import InlineKeyboardBuilder as _IKB
         kb = _IKB()
-        kb.button(text="◀️ Ещё", callback_data="users:extra")
+        kb.button(text=t("h.extra.more"), callback_data="users:extra")
         await _safe_edit(cq, "\n".join(lines).rstrip(), reply_markup=kb.as_markup())
     else:
         data = await _api_call(cq, client.get_users_quota)
@@ -785,8 +778,8 @@ async def cb_users_quota(cq: CallbackQuery, config: Config):
             return
         from aiogram.utils.keyboard import InlineKeyboardBuilder as _IKB
         kb = _IKB()
-        kb.button(text="🔄 Обновить", callback_data="users:quota")
-        kb.button(text="◀️ Ещё",      callback_data="users:extra")
+        kb.button(text=t("h.extra.refresh"), callback_data="users:quota")
+        kb.button(text=t("h.extra.more"),      callback_data="users:extra")
         kb.adjust(2)
         await _safe_edit(cq, format_users_quota(data), reply_markup=kb.as_markup())
 
@@ -803,12 +796,12 @@ async def cb_users_active_ips(cq: CallbackQuery, config: Config):
 
 @router.callback_query(F.data == "users:extra")
 async def cb_users_extra(cq: CallbackQuery):
-    await _safe_edit(cq, "⚙️ <b>Действия со списком</b>", reply_markup=users_extra_kb())
+    await _safe_edit(cq, t("h.extra.title"), reply_markup=users_extra_kb())
 
 
 @router.callback_query(F.data == "users:export_menu")
 async def cb_export_menu(cq: CallbackQuery):
-    await _safe_edit(cq, "📤 <b>Экспорт пользователей</b>", reply_markup=export_menu_kb())
+    await _safe_edit(cq, t("h.export.title"), reply_markup=export_menu_kb())
 
 
 @router.callback_query(F.data.startswith("users:export:"))
@@ -818,14 +811,14 @@ async def cb_users_export(cq: CallbackQuery, config: Config):
     users = await _api_call(cq, client.get_users)
     if not users:
         return
-    await cq.answer("⏳ Генерирую файл...")
+    await cq.answer(t("h.export.generating"))
     ts = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M")
     if fmt == "csv":
         data = users_to_csv(users, srv.name)
         fname = f"telemt_{srv.name}_{ts}.csv"
         await cq.message.answer_document(
             BufferedInputFile(data, filename=fname),
-            caption=f"📤 CSV — {srv.name} ({len(users)} клиентов)",
+            caption=t("h.export.csv", srv=srv.name, n=len(users)),
         )
     else:
         deltas = await db.get_all_users_traffic_delta(srv.name, days=7)
@@ -833,8 +826,7 @@ async def cb_users_export(cq: CallbackQuery, config: Config):
         fname = f"telemt_{srv.name}_{ts}.xlsx"
         await cq.message.answer_document(
             BufferedInputFile(data, filename=fname),
-            caption=f"📊 Excel — {srv.name} ({len(users)} клиентов)\n"
-                    f"<i>🟢 активные  🔴 истёкшие  Трафик за 7д из истории</i>",
+            caption=t("h.export.xlsx", srv=srv.name, n=len(users)),
         )
 
 
@@ -866,18 +858,18 @@ async def cb_users_expiring(cq: CallbackQuery, config: Config):
         except Exception:
             pass
 
-    lines = [f"<b>⏰ Сроки действия — {srv.group if srv.group else srv.name}</b>", ""]
-    lines.append(f"🔴 <b>Истёкших: {len(expired)}</b>")
+    lines = [t("h.expiring.title", srv=(srv.group or srv.name)), ""]
+    lines.append(t("h.expiring.expired", n=len(expired)))
     for name, dt in expired:
         lines.append(f"  <code>{name}</code> — {dt.strftime('%Y-%m-%d')}")
-    lines.append(f"\n🟡 <b>Истекают в течение 7 дней: {len(expiring)}</b>")
+    lines.append(t("h.expiring.soon", n=len(expiring)))
     for name, dt in expiring:
         lines.append(f"  <code>{name}</code> — {dt.strftime('%Y-%m-%d')}")
 
     from aiogram.utils.keyboard import InlineKeyboardBuilder as _IKB
     exp_kb = _IKB()
-    exp_kb.button(text="🧹 Удалить истёкших", callback_data="users:delete_expired_confirm")
-    exp_kb.button(text="◀️ К списку", callback_data="menu:users")
+    exp_kb.button(text=t("h.expiring.menu_btn"), callback_data="users:delete_expired_confirm")
+    exp_kb.button(text=t("h.common.to_list"), callback_data="menu:users")
     exp_kb.adjust(1)
     await _safe_edit(cq, "\n".join(lines), reply_markup=exp_kb.as_markup())
 
@@ -892,12 +884,12 @@ async def cb_delete_expired_confirm(cq: CallbackQuery, config: Config):
     expired = [u["username"] for u in users if u.get("expiration_rfc3339") and
                _parse_exp(u["expiration_rfc3339"]) and _parse_exp(u["expiration_rfc3339"]) < now]
     if not expired:
-        await cq.answer("Истёкших нет", show_alert=True)
+        await cq.answer(t("h.expiring.none"), show_alert=True)
         return
     names = ", ".join(expired[:8]) + ("..." if len(expired) > 8 else "")
     await _safe_edit(
         cq,
-        f"⚠️ Удалить <b>{len(expired)}</b> истёкших?\n\n<code>{names}</code>",
+        t("h.expiring.confirm", n=len(expired), names=names),
         reply_markup=users_delete_expired_confirm_kb(),
     )
 
@@ -907,15 +899,11 @@ async def cb_delete_expired_confirm(cq: CallbackQuery, config: Config):
 # Лимит имени для bulk: имя попадает в callback "user:links:{name}" (64 байта)
 BULK_NAME_MAX = 40
 BULK_MAX_COUNT = 50
-BULK_SPEC_HELP = (
-    "Отправь параметры одной строкой:\n"
-    "<code>шаблон количество дней [квота_GB]</code>\n\n"
-    "Примеры:\n"
-    "• <code>guest 5 30</code> → guest1…guest5 на 30 дней\n"
-    "• <code>vpn{n} 3 7 50</code> → vpn1…vpn3 на 7 дней, квота 50 ГБ\n"
-    "• <code>guest 10 0</code> → 10 юзеров без срока\n\n"
-    f"Количество: 1–{BULK_MAX_COUNT}, длина имени ≤ {BULK_NAME_MAX}."
-)
+def _bulk_spec_help() -> str:
+    return t(
+        "h.bulk.spec_help",
+        max_count=BULK_MAX_COUNT, name_max=BULK_NAME_MAX,
+    )
 
 
 def _bulk_names(template: str, count: int) -> list[str]:
@@ -929,7 +917,7 @@ def _parse_bulk_spec(text: str) -> tuple[list[str], int, int]:
     """Разбирает 'шаблон N дней [квота_GB]'. Бросает ValueError с текстом ошибки."""
     parts = text.split()
     if len(parts) < 3 or len(parts) > 4:
-        raise ValueError("Нужно 3–4 параметра: шаблон количество дней [квота_GB]")
+        raise ValueError(t("h.bulk.need_args"))
 
     template, cnt_raw, days_raw = parts[0], parts[1], parts[2]
     quota_raw = parts[3] if len(parts) == 4 else "0"
@@ -939,25 +927,21 @@ def _parse_bulk_spec(text: str) -> tuple[list[str], int, int]:
         days = int(days_raw)
         quota_gb = int(quota_raw)
     except ValueError:
-        raise ValueError("Количество, дни и квота должны быть целыми числами")
+        raise ValueError(t("h.bulk.need_ints"))
 
     if not 1 <= count <= BULK_MAX_COUNT:
-        raise ValueError(f"Количество: 1–{BULK_MAX_COUNT}")
+        raise ValueError(t("h.bulk.count_range", n=BULK_MAX_COUNT))
     if not 0 <= days <= 3650:
-        raise ValueError("Дни: 0 (без срока) … 3650")
+        raise ValueError(t("h.bulk.days_range"))
     if not 0 <= quota_gb <= 1024:
-        raise ValueError("Квота в ГБ: 0 (без квоты) … 1024")
+        raise ValueError(t("h.bulk.quota_range"))
 
     names = _bulk_names(template, count)
     for name in names:
         if not USERNAME_RE.match(name):
-            raise ValueError(
-                f"Имя <code>{name}</code> не подходит: латиница/цифры/._- , 1–64 символа"
-            )
+            raise ValueError(t("h.bulk.bad_name", name=name))
         if len(name) > BULK_NAME_MAX:
-            raise ValueError(
-                f"Имя <code>{name}</code> длиннее {BULK_NAME_MAX} символов — укоротите шаблон"
-            )
+            raise ValueError(t("h.bulk.name_too_long", name=name, n=BULK_NAME_MAX))
     return names, days, quota_gb
 
 
@@ -966,9 +950,9 @@ async def cb_user_bulk(cq: CallbackQuery, state: FSMContext):
     await state.set_state(BulkCreateFSM.waiting_spec)
     await _safe_edit(
         cq,
-        "<b>➕➕ Массовое создание клиентов</b>\n\n" + BULK_SPEC_HELP,
+        t("h.bulk.menu_title") + "\n\n" + _bulk_spec_help(),
         reply_markup=InlineKeyboardBuilder().button(
-            text="◀ Отмена", callback_data="menu:users"
+            text=t("h.bulk.cancel_btn"), callback_data="menu:users"
         ).adjust(1).as_markup(),
     )
 
@@ -977,13 +961,13 @@ async def cb_user_bulk(cq: CallbackQuery, state: FSMContext):
 async def fsm_bulk_spec(message: Message, state: FSMContext, config: Config):
     if message.text.startswith("/"):
         await state.clear()
-        await message.answer("❌ Отменено")
+        await message.answer(t("h.bulk.cancelled"))
         return
 
     try:
         names, days, quota_gb = _parse_bulk_spec(message.text or "")
     except ValueError as e:
-        await message.answer(f"❌ {e}\n\n{BULK_SPEC_HELP}")
+        await message.answer(f"❌ {e}\n\n{_bulk_spec_help()}")
         return
 
     await state.clear()
@@ -997,7 +981,7 @@ async def fsm_bulk_spec(message: Message, state: FSMContext, config: Config):
     except Exception:
         existing = set()
 
-    status = await message.answer(f"⏳ Создаю {len(names)} юзеров…")
+    status = await message.answer(t("h.bulk.creating", n=len(names)))
 
     created: list[str] = []
     skipped: list[str] = []
@@ -1052,30 +1036,30 @@ async def fsm_bulk_spec(message: Message, state: FSMContext, config: Config):
                     reload="instant",
                 )
         except Exception as e:
-            web_warn = f"\n⚠️ WEB-профили не добавлены: {e}"
+            web_warn = t("h.bulk.web_failed", err=e)
 
-    lines = [f"<b>➕➕ Массовое создание: готово</b>\n"]
+    lines = [t("h.bulk.done_title")]
     if created:
-        lines.append(f"✅ Создано: {len(created)}")
+        lines.append(t("h.bulk.created_n", n=len(created)))
     if skipped:
-        lines.append(f"⏭ Уже существуют: {', '.join(skipped[:10])}"
-                     + (f" …ещё {len(skipped) - 10}" if len(skipped) > 10 else ""))
+        lines.append(t("h.bulk.skipped", names=", ".join(skipped[:10]))
+                     + (t("h.common.more", n=len(skipped) - 10) if len(skipped) > 10 else ""))
     for name, err in failed[:10]:
         lines.append(f"❌ {name}: {err}")
     if len(failed) > 10:
-        lines.append(f"…ещё ошибок: {len(failed) - 10}")
+        lines.append(t("h.bulk.more_errors", n=len(failed) - 10))
     if days:
-        lines.append(f"📅 Срок: {days} дней")
+        lines.append(t("h.bulk.days_n", n=days))
     if quota_gb:
-        lines.append(f"💾 Квота: {quota_gb} ГБ на юзера")
+        lines.append(t("h.bulk.quota_n", n=quota_gb))
     lines.append(web_warn)
 
     kb = InlineKeyboardBuilder()
     for name in created[:8]:
         kb.button(text=f"🔗 {name}", callback_data=f"user:links:{name}")
     if len(created) > 8:
-        lines.append(f"\n<i>Ссылки остальных — через 🔍 Поиск.</i>")
-    kb.button(text="👥 К списку", callback_data="menu:users")
+        lines.append(t("h.bulk.links_hint"))
+    kb.button(text=t("h.bulk.to_users"), callback_data="menu:users")
     kb.adjust(2 if created else 1)
 
     await status.edit_text("\n".join(lines), reply_markup=kb.as_markup())
@@ -1105,7 +1089,7 @@ async def cb_delete_expired(cq: CallbackQuery, config: Config):
     ]
 
     if not expired:
-        await cq.answer("✅ Нет истёкших пользователей")
+        await cq.answer(t("h.expiring.all_fine"))
         return
 
     try:
@@ -1113,7 +1097,7 @@ async def cb_delete_expired(cq: CallbackQuery, config: Config):
             await _strip_web_profiles(TelemetClient(node.url, node.auth_header), set(expired))
     except Exception as e:
         logger.warning("Failed to remove WEB profiles for expired users: %s", e)
-        await cq.answer(f"❌ Не удалось убрать WEB-профили: {e}"[:200], show_alert=True)
+        await cq.answer(t("h.strip_profiles_failed", err=e)[:200], show_alert=True)
         return
 
     deleted = errors = 0
@@ -1124,7 +1108,7 @@ async def cb_delete_expired(cq: CallbackQuery, config: Config):
         else:
             errors += 1
 
-    await cq.answer(f"✅ Удалено: {deleted}, ошибок: {errors}")
+    await cq.answer(t("h.expiring.deleted_n", ok=deleted, err=errors))
     await _show_users(cq, config, 0)
 
 
@@ -1161,7 +1145,7 @@ async def cb_user_view(cq: CallbackQuery, config: Config):
                 max_recent_ips = max(max_recent_ips, node_user.get("recent_unique_ips", 0))
 
         if user is None:
-            await cq.answer("❌ Пользователь не найден", show_alert=True)
+            await cq.answer(t("h.user.not_found"), show_alert=True)
             return
 
         # Агрегируем данные
@@ -1200,7 +1184,7 @@ async def cb_rotate_secret(cq: CallbackQuery, config: Config):
     results = await cluster_write(members, "rotate_secret", username, new_secret)
     ok_results = [r for r in results if r.ok]
     if not ok_results:
-        await cq.answer("❌ Не удалось обновить секрет", show_alert=True)
+        await cq.answer(t("h.rotate.failed"), show_alert=True)
         return
     payload = ok_results[0].data if isinstance(ok_results[0].data, dict) else {}
     user = payload.get("user", payload)
@@ -1208,11 +1192,12 @@ async def cb_rotate_secret(cq: CallbackQuery, config: Config):
     status = ""
     if not _all_ok(results):
         status = "\n⚠️ " + _format_cluster_result([r for r in results if not r.ok])
-    await cq.answer("✅ Секрет обновлён")
+    await cq.answer(t("h.rotate.ok"))
     await cq.message.answer(
-        f"🔑 <b>Новый секрет — {username}</b>{status}\n\n"
-        f"<code>{new_secret}</code>\n\n"
-        f"<i>Сохраните — больше не будет показан</i>",
+        t("h.rotate.title", user=username, status=status)
+        + "\n\n"
+        + f"<code>{new_secret}</code>\n\n"
+        + t("h.rotate.save_hint"),
     )
     await _safe_edit(cq, format_user_detail(user), reply_markup=user_detail_kb(username, enabled=user.get("enabled", None)))
 
@@ -1223,12 +1208,12 @@ async def cb_rotate_secret(cq: CallbackQuery, config: Config):
 async def cb_user_toggle(cq: CallbackQuery, config: Config):
     parts    = cq.data.split(":")
     if len(parts) < 4:
-        await cq.answer("❌ Неверный формат", show_alert=True)
+        await cq.answer(t("h.toggle.bad_format"), show_alert=True)
         return
     username = parts[2]
     action   = parts[3]   # "enable" или "disable"
     if action not in ("enable", "disable"):
-        await cq.answer("❌ Неизвестное действие", show_alert=True)
+        await cq.answer(t("h.toggle.bad_action"), show_alert=True)
         return
 
     client, srv = await get_client(_uid(cq), config)
@@ -1239,16 +1224,16 @@ async def cb_user_toggle(cq: CallbackQuery, config: Config):
     ok_results  = [r for r in results if r.ok]
 
     if not ok_results:
-        await cq.answer("❌ Не удалось изменить статус", show_alert=True)
+        await cq.answer(t("h.toggle.failed"), show_alert=True)
         return
 
     user        = ok_results[0].data
-    status_text = "🟢 Включён" if action == "enable" else "🔴 Отключён"
+    status_text = t("h.toggle.on") if action == "enable" else t("h.toggle.off")
     await cq.answer(f"{status_text}: {username}")
 
     if not _all_ok(results):
         await cq.message.answer(
-            f"⚠️ Частичный результат:\n{_format_cluster_result([r for r in results if not r.ok])}"
+            t("h.common.partial_result") + "\n" + _format_cluster_result([r for r in results if not r.ok])
         )
 
     await _safe_edit(
@@ -1269,25 +1254,25 @@ async def cb_user_reset_quota(cq: CallbackQuery, config: Config):
     try:
         results = await cluster_write(members, "reset_user_quota", username)
     except Exception as e:
-        await cq.answer(f"❌ Ошибка: {e}", show_alert=True)
+        await cq.answer(t("h.common.err", err=e), show_alert=True)
         return
 
     if _all_ok(results):
-        await cq.answer("✅ Квота сброшена")
+        await cq.answer(t("h.quota.reset_ok"))
     else:
         errors = _format_cluster_result([r for r in results if not r.ok])
-        await cq.answer(f"⚠️ Ошибка на узлах:\n{errors}", show_alert=True)
+        await cq.answer(t("h.common.nodes_err", errors=errors), show_alert=True)
         return
 
     try:
         user = await cluster_read(members, "get_user", username)
         await _safe_edit(
             cq,
-            f"✅ Квота <b>{username}</b> сброшена\n\n" + format_user_detail(user),
+            t("h.quota.reset_title", user=username) + "\n\n" + format_user_detail(user),
             reply_markup=user_detail_kb(username, enabled=user.get("enabled", None)),
         )
     except Exception:
-        await _safe_edit(cq, f"✅ Квота <b>{username}</b> сброшена")
+        await _safe_edit(cq, t("h.quota.reset_title", user=username))
 
 
 # ─── Traffic history ──────────────────────────────────────────────────────────
@@ -1297,7 +1282,7 @@ async def cb_user_traffic(cq: CallbackQuery):
     username = cq.data.split(":", 2)[2]
     await _safe_edit(
         cq,
-        f"📊 <b>История трафика — {username}</b>\n\nВыберите период:",
+        t("h.traffic.menu", user=username),
         reply_markup=traffic_period_kb(username),
     )
 
@@ -1314,16 +1299,18 @@ async def cb_user_traffic_period(cq: CallbackQuery, config: Config):
 
     if len(rows) < 2:
         text = (
-            f"📊 <b>История — {username}</b> ({days}д)\n\n"
-            f"⚠️ Данных пока мало (точек: {len(rows)})\n"
-            f"<i>Сбор каждые 15 минут</i>"
+            t("h.traffic.few_title", user=username, days=days)
+            + "\n\n"
+            + t("h.traffic.few_points", n=len(rows))
+            + "\n"
+            + t("h.traffic.collect_hint")
         )
     else:
         lines = [
-            f"<b>📊 Трафик — {username} ({days}д)</b>",
-            f"  За период: <b>{fmt_bytes(delta_info['delta_bytes'])}</b>  |  Точек: {delta_info['points']}",
+            t("h.traffic.title", user=username, days=days),
+            t("h.traffic.period_row", total=fmt_bytes(delta_info['delta_bytes']), points=delta_info['points']),
             "",
-            "<b>Последние снимки:</b>",
+            t("h.chart.recent_snapshots"),
         ]
         prev = None
         for r in rows[-12:]:
@@ -1355,21 +1342,21 @@ async def cb_user_traffic_chart(cq: CallbackQuery, config: Config):
     parts = cq.data.split(":")
     username, days = parts[2], int(parts[3])
     _, srv = await get_client(_uid(cq), config)
-    await cq.answer("⏳ Строю график...")
+    await cq.answer(t("h.chart.building"))
 
     rows = await db.get_traffic_history(srv.name, username, days)
     if len(rows) < 2:
-        await cq.answer("⚠️ Мало данных (нужно минимум 2 точки)", show_alert=True)
+        await cq.answer(t("h.chart.not_enough"), show_alert=True)
         return
 
     buf = await asyncio.get_running_loop().run_in_executor(
         None, charts.render_user_traffic, rows, username, days, srv.name
     )
     if buf is None:
-        await cq.answer("⚠️ matplotlib не установлен на сервере", show_alert=True)
+        await cq.answer(t("h.chart.no_mpl"), show_alert=True)
         return
 
-    caption = f"📈 <b>{username}</b> — трафик за {days} дн. • {srv.name}"
+    caption = t("h.traffic.chart_caption", user=username, days=days, srv=srv.name)
     kb = traffic_period_kb(username, days, chart_mode=True)
     img_bytes = buf.read()
 
@@ -1402,23 +1389,23 @@ async def cb_traffic_report_chart(cq: CallbackQuery, config: Config):
     """PNG-график топ клиентов по трафику."""
     days = int(cq.data.split(":")[-1])
     _, srv = await get_client(_uid(cq), config)
-    await cq.answer("⏳ Строю график...")
+    await cq.answer(t("h.chart.building"))
 
     deltas = await db.get_all_users_traffic_delta(srv.name, days=days)
     if not deltas:
-        await cq.answer("⚠️ Нет данных за период", show_alert=True)
+        await cq.answer(t("h.chart.no_data"), show_alert=True)
         return
 
     buf = await asyncio.get_running_loop().run_in_executor(
         None, charts.render_traffic_report, deltas, days, srv.name
     )
     if buf is None:
-        await cq.answer("⚠️ matplotlib не установлен на сервере", show_alert=True)
+        await cq.answer(t("h.chart.no_mpl"), show_alert=True)
         return
 
     media = InputMediaPhoto(
         media=BufferedInputFile(buf.read(), filename=f"report_{srv.name}_{days}d.png"),
-        caption=f"📈 Топ клиентов — {days} дн. • {srv.name}",
+        caption=t("h.traffic.top_caption", days=days, srv=srv.name),
     )
     # Если сообщение уже фото — редактируем его (не плодим новые)
     if cq.message.photo:
@@ -1449,7 +1436,7 @@ async def cb_user_links(cq: CallbackQuery, config: Config):
         return
     all_links = _get_all_links(user)
     if not all_links:
-        await _safe_edit(cq, f"<b>🔗 Ссылки — {username}</b>\n\n— нет ссылок —",
+        await _safe_edit(cq, t("h.links.title", user=username) + "\n\n" + t("fmt.common.no_links"),
                          reply_markup=user_links_kb(username))
         return
     # Получаем WEB-конфиг и версию Telemt
@@ -1516,7 +1503,7 @@ async def _strip_web_profiles(client: TelemetClient, usernames: set[str]) -> Non
 @router.callback_query(F.data.startswith("user:delete_confirm:"))
 async def cb_user_delete_confirm(cq: CallbackQuery):
     username = cq.data.split(":", 2)[2]
-    await _safe_edit(cq, f"⚠️ Удалить <b>{username}</b>?\n\nДействие необратимо.",
+    await _safe_edit(cq, t("h.user.delete_confirm", user=username),
                      reply_markup=user_delete_confirm_kb(username))
 
 
@@ -1531,16 +1518,16 @@ async def cb_user_delete(cq: CallbackQuery, config: Config):
             await _strip_web_profiles(TelemetClient(node.url, node.auth_header), {username})
     except Exception as e:
         logger.warning("Failed to remove WEB profile for %s: %s", username, e)
-        await cq.answer(f"❌ Не удалось убрать WEB-профиль: {e}"[:200], show_alert=True)
+        await cq.answer(t("h.strip_profile_failed", err=e)[:200], show_alert=True)
         return
 
     results = await cluster_write(members, "delete_user", username)
 
     if _all_ok(results):
-        await cq.answer(f"✅ {username} удалён")
+        await cq.answer(t("h.user.deleted", user=username))
     else:
         status = _format_cluster_result(results)
-        await cq.answer(f"⚠️ Частичное удаление:\n{status}"[:200], show_alert=True)
+        await cq.answer((t("h.user.partial_delete") + "\n" + status)[:200], show_alert=True)
     await _show_users(cq, config, 0)
 
 
@@ -1558,7 +1545,7 @@ async def cmd_adduser(message: Message, config: Config):
     username = parts[1].strip()
     days = int(parts[2]) if len(parts) >= 3 and parts[2].isdigit() else None
     if not USERNAME_RE.match(username):
-        await message.answer("❌ Неверное имя")
+        await message.answer(t("h.adduser.bad_name"))
         return
 
     secret = _gen_secret()
@@ -1627,7 +1614,7 @@ async def cmd_find(message: Message, state: FSMContext, config: Config):
         await _do_search(message, parts[1].strip(), config)
     else:
         await state.set_state(SearchUserFSM.waiting_query)
-        await message.answer("🔍 Введите имя или часть имени клиента:")
+        await message.answer(t("h.search.prompt"))
 
 
 @router.message(SearchUserFSM.waiting_query, F.text.regexp(r"^[^/]"))
@@ -1642,7 +1629,7 @@ async def fsm_search_query(message: Message, state: FSMContext, config: Config):
 
 async def _do_search(message: Message, query: str, config: Config):
     if not query:
-        await message.answer("❌ Пустой запрос")
+        await message.answer(t("h.find.empty"))
         return
     client, srv = await get_client(_uid(message), config)
     members = config.get_group_members(srv)
@@ -1738,7 +1725,7 @@ async def cb_user_create_start(cq: CallbackQuery, state: FSMContext):
 async def fsm_create_username(message: Message, state: FSMContext):
     u = message.text.strip()
     if not USERNAME_RE.match(u):
-        await message.answer("❌ Только A-Z a-z 0-9 _ . - (1–64 символа)")
+        await message.answer(t("h.create.step1_err"))
         return
     await state.update_data(username=u)
     await state.set_state(CreateUserFSM.secret)
@@ -1755,7 +1742,7 @@ async def fsm_create_secret(message: Message, state: FSMContext):
         txt = _gen_secret()
         await message.answer(f"🎲 <code>{txt}</code>")
     if txt != "/skip" and not re.match(r"^[0-9a-fA-F]{32}$", txt):
-        await message.answer("❌ 32 hex-символа, /skip или /gen")
+        await message.answer(t("h.create.step2_err"))
         return
     data = await state.get_data()
     pl = data.get("payload", {})
@@ -1773,7 +1760,7 @@ async def fsm_create_max_tcp(message: Message, state: FSMContext):
         return
     txt = message.text.strip()
     if txt != "/skip" and not txt.isdigit():
-        await message.answer("❌ Число или /skip")
+        await message.answer(t("h.create.step3_err"))
         return
     data = await state.get_data()
     pl = data.get("payload", {})
@@ -1795,7 +1782,7 @@ async def fsm_create_expiration(message: Message, state: FSMContext):
             txt = (datetime.now(timezone.utc) + timedelta(days=int(txt))).strftime("%Y-%m-%dT%H:%M:%SZ")
             await message.answer(f"📅 <code>{txt}</code>")
         elif not re.match(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}", txt):
-            await message.answer("❌ Число дней, дата или /skip")
+            await message.answer(t("h.create.step4_err"))
             return
     data = await state.get_data()
     pl = data.get("payload", {})
@@ -1813,7 +1800,7 @@ async def fsm_create_quota(message: Message, state: FSMContext):
         return
     txt = message.text.strip()
     if txt != "/skip" and not txt.isdigit():
-        await message.answer("❌ Число байт или /skip")
+        await message.answer(t("h.create.step5_err"))
         return
     data = await state.get_data()
     pl = data.get("payload", {})
@@ -1831,7 +1818,7 @@ async def fsm_create_max_ips(message: Message, state: FSMContext):
         return
     txt = message.text.strip()
     if txt != "/skip" and not txt.isdigit():
-        await message.answer("❌ Число или /skip")
+        await message.answer(t("h.create.step3_err"))
         return
     data = await state.get_data()
     pl = data.get("payload", {})
@@ -1855,7 +1842,7 @@ async def fsm_create_confirm(message: Message, state: FSMContext, config: Config
         return
     if message.text.strip().lower() not in ("да", "yes", "y", "д"):
         await state.clear()
-        await message.answer("❌ Отменено. /menu")
+        await message.answer(t("h.create.confirmed_cancel"))
         return
     data = await state.get_data()
     pl = {k: v for k, v in data.get("payload", {}).items() if v is not None}
@@ -1955,12 +1942,12 @@ async def fsm_edit_value(message: Message, state: FSMContext, config: Config):
     txt = message.text.strip()
     await state.clear()
     if txt == "/skip":
-        await message.answer("⏭ Без изменений. /menu")
+        await message.answer(t("h.edit.no_change"))
         return
     value = txt
     if field in ("max_tcp_conns", "data_quota_bytes", "max_unique_ips"):
         if not txt.isdigit():
-            await message.answer("❌ Нужно целое число")
+            await message.answer(t("h.edit.not_int"))
             return
         value = int(txt)
     elif field in ("rate_limit_up_bps", "rate_limit_down_bps"):
@@ -1971,13 +1958,13 @@ async def fsm_edit_value(message: Message, state: FSMContext, config: Config):
             value = int(txt)
         else:
             await message.answer(
-                "❌ Укажите скорость в байт/с (например <code>1048576</code> для 1 MB/s)\n"
-                "или <code>0</code> чтобы снять лимит"
+                t("h.edit.bad_rate")
+                + t("h.edit.rate_zero_hint")
             )
             return
     elif field == "secret":
         if not re.match(r"^[0-9a-fA-F]{32}$", txt):
-            await message.answer("❌ Ровно 32 hex-символа")
+            await message.answer(t("h.edit.bad_secret"))
             return
     elif field == "expiration_rfc3339" and txt.isdigit():
         value = (datetime.now(timezone.utc) + timedelta(days=int(txt))).strftime("%Y-%m-%dT%H:%M:%SZ")
@@ -2011,7 +1998,7 @@ async def fsm_edit_value(message: Message, state: FSMContext, config: Config):
 
 @router.callback_query(F.data == "menu:runtime")
 async def cb_runtime_menu(cq: CallbackQuery):
-    await _safe_edit(cq, "<b>⚡ Runtime</b>\n\nВыберите раздел:", reply_markup=runtime_kb())
+    await _safe_edit(cq, t("h.runtime.title"), reply_markup=runtime_kb())
 
 
 @router.callback_query(F.data == "runtime:gates")
@@ -2091,7 +2078,7 @@ async def cb_runtime_tls_fingerprints(cq: CallbackQuery, config: Config):
 
 @router.callback_query(F.data == "menu:security")
 async def cb_security_menu(cq: CallbackQuery):
-    await _safe_edit(cq, "<b>🔒 Безопасность</b>", reply_markup=security_kb())
+    await _safe_edit(cq, t("h.security.title"), reply_markup=security_kb())
 
 
 @router.callback_query(F.data == "security:posture")
@@ -2139,7 +2126,7 @@ def _proxy_prompt_kb() -> InlineKeyboardMarkup:
     """Клавиатура только с кнопкой Меню — пока ждём ссылку."""
     from aiogram.utils.keyboard import InlineKeyboardBuilder as _IKB
     kb = _IKB()
-    kb.button(text="◀️ Меню", callback_data="menu:main")
+    kb.button(text=t("h.common.menu"), callback_data="menu:main")
     kb.adjust(1)
     return kb.as_markup()
 
@@ -2147,15 +2134,16 @@ def _proxy_prompt_kb() -> InlineKeyboardMarkup:
 @router.callback_query(F.data == "menu:proxy_check")
 async def cb_proxy_check_menu(cq: CallbackQuery, state: FSMContext, config: Config):
     if config.lite_mode:
-        await cq.answer("⛔ Недоступно в lite-режиме", show_alert=True)
+        await cq.answer(t("h.common.lite"), show_alert=True)
         return
     await state.set_state(ProxyCheckFSM.waiting_url)
     await cq.answer()
     await cq.message.answer(
-        "🔍 <b>Проверка узла</b>\n\n"
-        "Отправь ссылку на прокси:\n"
-        "<code>tg://proxy?server=HOST&port=443&secret=SECRET</code>\n\n"
-        "Проверка: DNS, TCP, SSH, Ping, MTProto",
+        t("h.check.menu_title")
+        + "\n"
+        + t("h.check.prompt")
+        + "\n<code>tg://proxy?server=HOST&port=443&secret=SECRET</code>\n\n"
+        + t("h.check.methods"),
         reply_markup=_proxy_prompt_kb(),
     )
 
@@ -2163,12 +2151,12 @@ async def cb_proxy_check_menu(cq: CallbackQuery, state: FSMContext, config: Conf
 @router.callback_query(F.data == "proxy:check_again")
 async def cb_proxy_check_again(cq: CallbackQuery, state: FSMContext, config: Config):
     if config.lite_mode:
-        await cq.answer("⛔ Недоступно в lite-режиме", show_alert=True)
+        await cq.answer(t("h.common.lite"), show_alert=True)
         return
     await state.set_state(ProxyCheckFSM.waiting_url)
     await cq.answer()
     await cq.message.answer(
-        "🔍 Отправь ссылку на прокси:",
+        t("h.check.prompt2"),
         reply_markup=_proxy_prompt_kb(),
     )
 
@@ -2183,9 +2171,10 @@ async def fsm_proxy_check_url(message: Message, state: FSMContext, config: Confi
     if not (url.startswith("tg://") or "t.me/proxy" in url):
         await state.set_state(ProxyCheckFSM.waiting_url)
         await message.answer(
-            "❌ Не удалось распознать ссылку.\n\n"
-            "Ожидается формат:\n"
-            "<code>tg://proxy?server=HOST&port=443&secret=SECRET</code>",
+            t("h.check.unrecognized")
+            + "\n"
+            + t("h.check.expected_format")
+            + "\n<code>tg://proxy?server=HOST&port=443&secret=SECRET</code>",
             reply_markup=_proxy_prompt_kb(),
         )
         return
@@ -2194,12 +2183,12 @@ async def fsm_proxy_check_url(message: Message, state: FSMContext, config: Confi
     if info is None:
         await state.set_state(ProxyCheckFSM.waiting_url)
         await message.answer(
-            "❌ Не удалось разобрать ссылку — проверь формат.",
+            t("h.check.bad_link2"),
             reply_markup=_proxy_prompt_kb(),
         )
         return
 
-    wait_msg = await message.answer("⏳ Проверяю узел, подожди 2-8 секунд...")
+    wait_msg = await message.answer(t("h.check.checking"))
     info = await pc.check_node_full(
         info, timeout=5.0,
         agents=config.agents if config.agents else None,
@@ -2229,9 +2218,10 @@ async def cmd_check(message: Message, state: FSMContext, config: Config):
     else:
         await state.set_state(NodeCheckFSM.waiting_url)
         await message.answer(
-            "🔍 <b>Диагностика узла</b>\n\n"
-            "Отправь ссылку на прокси:\n"
-            "<code>/check tg://proxy?server=HOST&port=443&secret=SECRET</code>",
+            t("h.node.title")
+            + "\n"
+            + t("h.check.prompt")
+            + "\n<code>/check tg://proxy?server=HOST&port=443&secret=SECRET</code>",
             reply_markup=_proxy_prompt_kb(),
         )
 
@@ -2259,7 +2249,7 @@ async def _do_node_check(message: Message, state: FSMContext, url: str):
         )
         return
 
-    wait_msg = await message.answer("⏳ Проверяю узел, подожди 2-8 секунд...")
+    wait_msg = await message.answer(t("h.check.checking"))
 
     # Получаем агенты из конфига (нужен uid → config)
     config = None
@@ -2575,7 +2565,7 @@ async def cb_config_edit_apply(cq: CallbackQuery, config: Config):
     section_data = cache.get(section, {})
 
     if not section_data:
-        await cq.answer("❌ Нет данных для применения", show_alert=True)
+        await cq.answer(t("h.cfg.no_data"), show_alert=True)
         return
 
     # Применяем секцию целиком; reload делаем тем же запросом (единый If-Match)
@@ -2609,13 +2599,13 @@ async def cb_config_edit_apply(cq: CallbackQuery, config: Config):
         text += f"\n🔄 Reload <code>{reload_info.get('mode', reload_mode)}</code> принят (ID: <code>{rid}</code>, {state})\n"
         text += f"Проверить: <code>/reload_status {rid}</code>\n"
     elif runtime_reload:
-        text += "\n⚠️ Изменения требуют runtime reload — выберите режим ниже\n"
+        text += t("h.cfg.need_reload")
     if process_restart:
-        text += "⛔ Нужен перезапуск процесса Telemt\n"
+        text += t("h.cfg.need_restart")
     if deferred:
         text += f"Отложено до перезапуска: <code>{', '.join(deferred)}</code>\n"
     if not runtime_reload and not process_restart and not reload_info:
-        text += "✅ Hot-reload — перезапуск не требуется\n"
+        text += t("h.cfg.hot_reload")
 
     needs_reload = bool(runtime_reload) and not reload_info and not config.lite_mode
     await _safe_edit(cq, text, reply_markup=config_edit_after_kb(section, needs_reload))
@@ -2625,12 +2615,12 @@ async def cb_config_edit_apply(cq: CallbackQuery, config: Config):
 async def cb_config_edit_reload(cq: CallbackQuery, config: Config):
     """Runtime reload после применения секции."""
     if config.lite_mode:
-        await cq.answer("⛔ Отключено в lite-режиме", show_alert=True)
+        await cq.answer(t("h.cfg.lite_block"), show_alert=True)
         return
 
     _, _, mode, section = cq.data.split(":")
     if mode not in ("instant", "drain"):
-        await cq.answer("❌ Неверный режим", show_alert=True)
+        await cq.answer(t("h.cfg.bad_mode"), show_alert=True)
         return
 
     client, srv = await get_client(_uid(cq), config)
@@ -2678,9 +2668,9 @@ async def cmd_reload(message: Message, config: Config):
 
     if mode not in ("instant", "drain"):
         await message.answer(
-            "❌ Неверный режим. Допустимые: <code>instant</code>, <code>drain</code>\n\n"
-            "<b>instant</b> — мгновенное переключение, старые сессии отменяются\n"
-            "<b>drain</b> — плавное завершение старых сессий"
+            t("h.reload.bad_mode")
+            + t("h.reload.instant_hint")
+            + t("h.reload.drain_hint")
         )
         return
 
@@ -2718,7 +2708,7 @@ async def cmd_reload_status(message: Message, config: Config):
         return
     args = message.text.replace("/reload_status", "", 1).strip().split()
     if not args or not args[0].isdigit():
-        await message.answer("Использование: <code>/reload_status &lt;id&gt;</code>")
+        await message.answer(t("h.reload.usage"))
         return
 
     reload_id = int(args[0])
@@ -2916,7 +2906,7 @@ async def cb_web_close_session(cq: CallbackQuery, config: Config):
         runtime_instance = ""
 
     if not runtime_instance:
-        await cq.answer("❌ WEB runtime недоступен", show_alert=True)
+        await cq.answer(t("h.web.runtime_down"), show_alert=True)
         return
 
     # Восстанавливаем полный session_ref
@@ -2938,14 +2928,14 @@ async def cb_web_close_session(cq: CallbackQuery, config: Config):
 
     if state == "completed":
         counters = _op_counters(final)
-        msg = "✅ Сессия закрыта" + (f" ({counters})" if counters else "")
+        msg = t("h.web.closed_ok") + (f" ({counters})" if counters else "")
     elif state == "failed":
-        reason = final.get("failure") or final.get("failure_token") or "ошибка операции"
+        reason = final.get("failure") or final.get("failure_token") or t("h.web.op_failed_reason")
         msg = f"❌ Не удалось закрыть: {reason}"
     elif state == "poll_error":
         msg = f"⚠️ Запрос отправлен, но статус не получен: {final.get('error', '')}"
     elif state in ("cancelled",):
-        msg = "⚠️ Операция отменена"
+        msg = t("h.web.op_cancelled")
     else:
         msg = f"⏳ Операция ещё выполняется (state: {state})"
 
@@ -2968,7 +2958,7 @@ async def cb_web_debug_clear(cq: CallbackQuery, config: Config):
         runtime_instance = ""
 
     if not runtime_instance:
-        await cq.answer("❌ WEB runtime недоступен", show_alert=True)
+        await cq.answer(t("h.web.runtime_down"), show_alert=True)
         return
 
     try:
@@ -2996,7 +2986,7 @@ async def cb_web_carrier_reset(cq: CallbackQuery, config: Config):
         runtime_instance = ""
 
     if not runtime_instance:
-        await cq.answer("❌ WEB runtime недоступен", show_alert=True)
+        await cq.answer(t("h.web.runtime_down"), show_alert=True)
         return
 
     try:
@@ -3023,12 +3013,12 @@ async def cb_web_pause(cq: CallbackQuery, config: Config):
         runtime_instance = ""
 
     if not runtime_instance:
-        await cq.answer("❌ WEB runtime недоступен", show_alert=True)
+        await cq.answer(t("h.web.runtime_down"), show_alert=True)
         return
 
     try:
         await client.web_lifecycle_pause(runtime_instance)
-        await cq.answer("⏸ Пауза — admission закрыт", show_alert=True)
+        await cq.answer(t("h.web.paused"), show_alert=True)
     except ApiError as e:
         await cq.answer(f"❌ {e.message}", show_alert=True)
         return
@@ -3048,12 +3038,12 @@ async def cb_web_drain(cq: CallbackQuery, config: Config):
         runtime_instance = ""
 
     if not runtime_instance:
-        await cq.answer("❌ WEB runtime недоступен", show_alert=True)
+        await cq.answer(t("h.web.runtime_down"), show_alert=True)
         return
 
     try:
         await client.web_lifecycle_drain(runtime_instance, timeout_secs=30)
-        await cq.answer("🔄 Drain запущен (30с)", show_alert=True)
+        await cq.answer(t("h.web.drain_started"), show_alert=True)
     except ApiError as e:
         await cq.answer(f"❌ {e.message}", show_alert=True)
         return
@@ -3073,12 +3063,12 @@ async def cb_web_resume(cq: CallbackQuery, config: Config):
         runtime_instance = ""
 
     if not runtime_instance:
-        await cq.answer("❌ WEB runtime недоступен", show_alert=True)
+        await cq.answer(t("h.web.runtime_down"), show_alert=True)
         return
 
     try:
         await client.web_lifecycle_resume(runtime_instance)
-        await cq.answer("▶️ Resume — admission открыт", show_alert=True)
+        await cq.answer(t("h.web.resumed"), show_alert=True)
     except ApiError as e:
         await cq.answer(f"❌ {e.message}", show_alert=True)
         return
@@ -3136,7 +3126,7 @@ async def cmd_alerts(message: Message, config: Config):
 @router.callback_query(F.data.startswith("alert:toggle:"))
 async def cb_alert_toggle(cq: CallbackQuery, config: Config):
     if config.lite_mode:
-        await cq.answer("⛔ Недоступно в lite-режиме", show_alert=True)
+        await cq.answer(t("h.common.lite"), show_alert=True)
         return
     uid = _uid(cq)
     alert_type = cq.data.split(":")[-1]
@@ -3147,8 +3137,11 @@ async def cb_alert_toggle(cq: CallbackQuery, config: Config):
     new_state = not current
     await set_alert(uid, srv.name, alert_type, threshold=None, enabled=new_state)
 
-    label = ALERT_LABELS.get(alert_type, alert_type)
-    await cq.answer(f"{'✅' if new_state else '☑️'} {label}: {'включён' if new_state else 'выключен'}")
+    label = t(ALERT_LABELS.get(alert_type, alert_type))
+    await cq.answer(
+        f"{'✅' if new_state else '☑️'} {label}: "
+        f"{t('h.alerts.on') if new_state else t('h.alerts.off')}"
+    )
 
     states = {}
     for atype in ALERT_LABELS:
@@ -3160,7 +3153,7 @@ async def cb_alert_toggle(cq: CallbackQuery, config: Config):
 @router.message(Command("status"))
 async def cmd_status(message: Message, config: Config):
     """/status — быстрый статус всех серверов"""
-    lines = ["<b>⚡ Статус серверов</b>", ""]
+    lines = [t("h.status.title"), ""]
     for srv in config.servers:
         from api_client import TelemetClient
         client = TelemetClient(srv.url, srv.auth_header)

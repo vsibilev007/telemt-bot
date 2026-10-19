@@ -12,6 +12,8 @@ from typing import Optional
 
 import tz as _tz
 
+from i18n import t
+
 
 def _extract_sni_from_link(link: str) -> str:
     """Извлекает SNI (домен маскировки) из tg://proxy ссылки."""
@@ -103,7 +105,9 @@ def tg_deep_link(link: str) -> str:
     return link.strip()
 
 
-def format_proxy_link(link: str, label: str = "Подключить") -> str:
+def format_proxy_link(link: str, label: str = "") -> str:
+    if not label:
+        label = t("fmt.common.connect")
     href = html.escape(tg_deep_link(link), quote=True)
     return f'<a href="{href}">{html.escape(label)}</a>'
 
@@ -131,12 +135,12 @@ def fmt_uptime(seconds: float) -> str:
     m, s = divmod(s, 60)
     parts = []
     if d:
-        parts.append(f"{d}д")
+        parts.append(f"{d}{t('fmt.up.d')}")
     if h:
-        parts.append(f"{h}ч")
+        parts.append(f"{h}{t('fmt.up.h')}")
     if m:
-        parts.append(f"{m}м")
-    parts.append(f"{s}с")
+        parts.append(f"{m}{t('fmt.up.m')}")
+    parts.append(f"{s}{t('fmt.up.s')}")
     return " ".join(parts)
 
 
@@ -157,7 +161,7 @@ def fmt_pct(v: float) -> str:
 def fmt_rtt(v: Optional[float]) -> str:
     if v is None:
         return "—"
-    return f"{v:.1f} мс"
+    return f"{v:.1f} {t('fmt.common.ms')}"
 
 
 # ─── Dashboard ────────────────────────────────────────────────────────────────
@@ -189,17 +193,17 @@ def fmt_rtt(v: Optional[float]) -> str:
 #    return "\n".join([
 #        f"<b>📊 Dashboard — {server_name}</b>",
 #        "",
-#        f"{status_icon} Статус: <b>{status.upper()}</b>  {'🔒 Read-only' if ro else '🔓 RW'}",
+#        f"{status_icon} {t('fmt.dash.status')}: <b>{status.upper()}</b>  {'🔒 Read-only' if ro else '🔓 RW'}",
 #        f"⏱ Uptime: <b>{fmt_uptime(uptime)}</b>",
-#        f"🏷 Версия: <b>v{version}</b>" + (f" <code>{git_short}</code>" if git_short else ""),
+#        f"🏷 {t('fmt.dash.version')}: <b>v{version}</b>" + (f" <code>{git_short}</code>" if git_short else ""),
 #        f"💻 {arch} / {os_name}",
 #        "",
-#        "<b>📈 Соединения</b>",
+#        f"<b>📈 {t('fmt.dash.connections')}</b>",
 #        f"  Всего: <b>{conns:,}</b>  |  Плохих: {bad:,}  |  HS timeout: {hs_to:,}",
 #        f"  Пользователей: <b>{users_count}</b>",
 #        "",
 #        "<b>⚙️ Runtime</b>",
-#        f"  {st_icon} {startup}  |  Принимает: {fmt_bool(accepting)}",
+#        f"  {st_icon} {startup}  |  {t('fmt.dash.accepting')}: {fmt_bool(accepting)}",
 #        f"  Middle proxy: {fmt_bool(use_me)}  |  ME ready: {fmt_bool(me_ready)}",
 #    ])
 def _now_str() -> str:
@@ -240,10 +244,10 @@ def format_dashboard(health, summary, sysinfo, gates, server_name, online_users)
 
     # --- bad by class ---
     BAD_LABELS = {
-        "tls_handshake_bad_client":           "Плохой TLS клиент",
-        "direct_modes_disabled":              "Прямой режим отключён",
-        "unknown_tls_sni":                    "Неизвестный SNI",
-        "tls_clienthello_len_out_of_bounds":  "Некорректный ClientHello",
+        "tls_handshake_bad_client":           "fmt.bad.tls",
+        "direct_modes_disabled":              "fmt.bad.direct_off",
+        "unknown_tls_sni":                    "fmt.bad.unknown_sni",
+        "tls_clienthello_len_out_of_bounds":  "fmt.bad.bad_chello",
     }
     bad_by_class = summary.get("connections_bad_by_class", [])
     bad_lines = []
@@ -252,15 +256,15 @@ def format_dashboard(health, summary, sysinfo, gates, server_name, online_users)
         total = entry.get("total", 0)
         if total == 0:
             continue
-        label = BAD_LABELS.get(cls, cls)
+        label = t(BAD_LABELS.get(cls, cls)) if BAD_LABELS.get(cls) else cls
         bad_lines.append(f"  • {label}: <b>{total:,}</b>")
 
     # --- handshake failures by class ---
     HS_LABELS = {
-        "timeout":                              ("🟡", "Таймаут"),
-        "expected_64_got_0_unexpected_eof":     ("⚫", "Обрыв соединения"),
-        "expected_64_got_0_connection_reset":   ("⚫", "Сброс соединения"),
-        "other":                                ("⚫", "Прочее"),
+        "timeout":                              ("🟡", "fmt.hs.timeout"),
+        "expected_64_got_0_unexpected_eof":     ("⚫", "fmt.hs.eof"),
+        "expected_64_got_0_connection_reset":   ("⚫", "fmt.hs.reset"),
+        "other":                                ("⚫", "fmt.hs.other"),
     }
     hs_by_class = summary.get("handshake_failures_by_class", [])
     hs_lines = []
@@ -269,36 +273,37 @@ def format_dashboard(health, summary, sysinfo, gates, server_name, online_users)
         total = entry.get("total", 0)
         if total == 0:
             continue
-        icon, label = HS_LABELS.get(cls, ("⚫", cls))
+        _pair = HS_LABELS.get(cls)
+        icon, label = (_pair[0], t(_pair[1])) if _pair else ("⚫", cls)
         hs_lines.append(f"  {icon} {label}: <b>{total:,}</b>")
 
     lines = [
         f"<b>{server_name}</b>",
         "",
-        f"{status_icon} Статус: <b>{status.upper()}</b>  {'🔒 Read-only' if ro else '🔓 RW'}",
+        f"{status_icon} {t('fmt.dash.status')}: <b>{status.upper()}</b>  {'🔒 Read-only' if ro else '🔓 RW'}",
         f"⏱ Uptime: <b>{fmt_uptime(uptime)}</b>",
-        f"🏷 Версия: <b>v{version}</b>" + (f" <code>{git_short}</code>" if git_short else ""),
+        f"🏷 {t('fmt.dash.version')}: <b>v{version}</b>" + (f" <code>{git_short}</code>" if git_short else ""),
         f"💻 {arch} / {os_name}",
         "",
-        "<b>📈 Соединения</b>",
-        f"  Всего: <b>{conns:,}</b>",
-        f"  {load_icon} Плохих: {bad:,} ({bad_percent:.1f}%)  |  {hs_icon} HS: {hs_to:,}",
-        f"  {online_icon} Онлайн: <b>{online_users}</b> / {users_count}",
+        f"<b>📈 {t('fmt.dash.connections')}</b>",
+        f"  {t('fmt.common.total')}: <b>{conns:,}</b>",
+        f"  {load_icon} {t('fmt.dash.bad')}: {bad:,} ({bad_percent:.1f}%)  |  {hs_icon} HS: {hs_to:,}",
+        f"  {online_icon} {t('fmt.dash.online')}: <b>{online_users}</b> / {users_count}",
     ]
 
     if bad_lines:
-        lines += ["", "<b>🔍 Плохие соединения</b>"] + bad_lines
+        lines += ["", f"<b>🔍 {t('fmt.dash.bad_title')}</b>"] + bad_lines
 
     if hs_lines:
-        lines += ["", "<b>⏳ Фейлы handshake</b>"] + hs_lines
+        lines += ["", f"<b>⏳ {t('fmt.dash.hs_title')}</b>"] + hs_lines
 
     lines += [
         "",
         "<b>⚙ Runtime</b>",
-        f"  {st_icon} {startup}  |  Принимает: {fmt_bool(accepting)}",
+        f"  {st_icon} {startup}  |  {t('fmt.dash.accepting')}: {fmt_bool(accepting)}",
         f"  Middle proxy: {fmt_bool(use_me)}  |  ME ready: {fmt_bool(me_ready)}",
         "",
-        f"<i>🕐 Обновлено: {_now_str()}</i>",
+        f"<i>🕐 {t('fmt.common.updated')}: {_now_str()}</i>",
     ]
 
     return "\n".join(lines)
@@ -307,9 +312,9 @@ def format_dashboard(health, summary, sysinfo, gates, server_name, online_users)
 
 def format_user_list(users: list) -> str:
     if not users:
-        return "👥 <b>Пользователи</b>\n\nСписок пуст"
+        return f"👥 <b>{t('fmt.users.header')}</b>\n\n{t('fmt.common.empty_list')}"
     active = sum(1 for u in users if u.get("current_connections", 0) > 0)
-    return f"<b>👥 Клиенты</b>  {active} онлайн / {len(users)} всего"
+    return f"<b>👥 {t('fmt.users.clients')}</b>  {active} {t('fmt.users.online')} / {len(users)} {t('fmt.users.total')}"
 
 
 def format_user_detail(u: dict) -> str:
@@ -340,11 +345,11 @@ def format_user_detail(u: dict) -> str:
 
     # Статус disabled — показываем только если API явно вернул enabled=false
     if enabled is False:
-        lines.append("🔴 <b>Клиент отключён</b>")
+        lines.append(f"🔴 <b>{t('fmt.users.disabled')}</b>")
 
     lines += [
         "",
-        f"🔌 Соединений: <b>{conns}</b>",
+        f"🔌 {t('fmt.users.conns')}: <b>{conns}</b>",
     ]
 
     if nodes:
@@ -355,8 +360,8 @@ def format_user_detail(u: dict) -> str:
         lines.append("\n".join(node_lines))
 
     lines += [
-        f"📊 Трафик: <b>{octets}</b>",
-        f"🌐 IP: {active_ips} активных / {recent_ips} недавних",
+        f"📊 {t('fmt.users.traffic')}: <b>{octets}</b>",
+        f"🌐 IP: {active_ips} {t('fmt.users.active')} / {recent_ips} {t('fmt.users.recent')}",
     ]
 
     if ip_list:
@@ -367,21 +372,21 @@ def format_user_detail(u: dict) -> str:
 
     lines += [
         "",
-        "<b>⚙️ Лимиты</b>",
+        f"<b>⚙️ {t('fmt.users.limits')}</b>",
         f"  Max TCP: {max_tcp if max_tcp else '—'}  |  Max IP: {max_ip if max_ip else '—'}",
-        f"  Квота: {fmt_bytes(quota) if quota else '—'}",
-        f"  Истекает: {exp[:10] if exp else '—'}",
+        f"  {t('fmt.users.quota')}: {fmt_bytes(quota) if quota else '—'}",
+        f"  {t('fmt.users.expires')}: {exp[:10] if exp else '—'}",
     ]
 
     # Rate limits — показываем только если заданы
     if rate_up or rate_down:
-        up_str = f"{fmt_bytes(rate_up)}/с" if rate_up else "—"
-        down_str = f"{fmt_bytes(rate_down)}/с" if rate_down else "—"
+        up_str = f"{fmt_bytes(rate_up)}/{t('fmt.common.per_s')}" if rate_up else "—"
+        down_str = f"{fmt_bytes(rate_down)}/{t('fmt.common.per_s')}" if rate_down else "—"
         lines.append(f"  ⬆️ {up_str}  ⬇️ {down_str}")
 
     lines += [
         "",
-        f"🔗 Ссылок: {len(all_links)}",
+        f"🔗 {t('fmt.users.links')}: {len(all_links)}",
     ]
 
     return "\n".join(lines)
@@ -389,11 +394,11 @@ def format_user_detail(u: dict) -> str:
 
 def format_users_quota(data: dict) -> str:
     """Форматирует ответ GET /v1/users/quota (3.4.12+)"""
-    lines = ["<b>📊 Квоты пользователей</b>", ""]
+    lines = [f"<b>📊 {t('fmt.quota.title')}</b>", ""]
 
     users = data.get("users", [])
     if not users:
-        lines.append("<i>Квоты не заданы</i>")
+        lines.append(f"<i>{t('fmt.quota.none')}</i>")
         return "\n".join(lines)
 
     for u in users:
@@ -411,7 +416,7 @@ def format_users_quota(data: dict) -> str:
                 f"  {fmt_bytes(used)} / {fmt_bytes(quota)}"
             )
         else:
-            lines.append(f"⚪ <b>{name}</b> — квота не задана")
+            lines.append(f"⚪ <b>{name}</b> — {t('fmt.quota.not_set')}")
 
     return "\n".join(lines)
 
@@ -440,9 +445,9 @@ def format_user_links(u: dict, web_config: dict = None, telemt_version: str = ""
     all_links = classic + secure + tls_links
 
     if not all_links:
-        return f"<b>🔗 Ссылки — {username}</b>\n\n— нет ссылок —", []
+        return f"<b>🔗 {t('fmt.links.title')} — {username}</b>\n\n{t('fmt.common.no_links')}", []
 
-    parts = [f"<b>🔗 Ссылки — {username}</b>"]
+    parts = [f"<b>🔗 {t('fmt.links.title')} — {username}</b>"]
 
     # WEB-ссылки (tg://webproxy) — только для Telemt >= 3.5.5
     web_links = []
@@ -490,7 +495,7 @@ def format_user_links(u: dict, web_config: dict = None, telemt_version: str = ""
             else:
                 parts.append(format_proxy_link(link))
 
-    parts.append("\n<i>Нажмите «Подключить», чтобы добавить прокси</i>")
+    parts.append(f"\n<i>{t('fmt.links.tap_hint')}</i>")
     return "\n".join(parts), all_links + [wl[1] for wl in web_links]
 
 
@@ -506,8 +511,8 @@ def format_runtime_gates(g: dict) -> str:
         "<b>🎯 Runtime Gates</b>",
         "",
         f"  Startup: {icons.get(startup,'❓')} <b>{startup}</b> ({prog:.0f}%)",
-        f"  Стадия: {stage}",
-        f"  Принимает соед.: {fmt_bool(g.get('accepting_new_connections', False))}",
+        f"  {t('fmt.rt.stage')}: {stage}",
+        f"  {t('fmt.rt.accepting')}: {fmt_bool(g.get('accepting_new_connections', False))}",
         f"  Middle proxy: {fmt_bool(g.get('use_middle_proxy', False))}",
         f"  ME ready: {fmt_bool(g.get('me_runtime_ready', False))}",
         f"  ME→DC fallback: {fmt_bool(g.get('me2dc_fallback_enabled', False))}",
@@ -532,8 +537,8 @@ def format_runtime_init(d: dict) -> str:
         "<b>🚀 Runtime Init</b>",
         "",
         f"  {icons.get(status,'❓')} <b>{status}</b> ({prog:.0f}%)  |  {'⚠️ degraded' if degraded else 'ok'}",
-        f"  Режим: {mode}  |  Время: {elapsed} мс",
-        f"  Готов: {fmt_ts(ready_at)}",
+        f"  {t('fmt.rt.mode')}: {mode}  |  {t('fmt.rt.time')}: {elapsed} {t('fmt.common.ms')}",
+        f"  {t('fmt.rt.ready')}: {fmt_ts(ready_at)}",
         "",
         f"<b>ME:</b> {icons.get(me_status,'❓')} {me_status} — {me_stage}",
     ]
@@ -542,11 +547,11 @@ def format_runtime_init(d: dict) -> str:
 
     if components:
         lines.append("")
-        lines.append("<b>Компоненты:</b>")
+        lines.append(f"<b>{t('fmt.rt.components')}</b>")
         for c in components:
             c_icon = icons.get(c.get("status", ""), "❓")
             dur = c.get("duration_ms")
-            dur_str = f" {dur}мс" if dur else ""
+            dur_str = f" {dur} {t('fmt.common.ms')}" if dur else ""
             lines.append(f"  {c_icon} {c.get('title', c.get('id', '?'))}{dur_str}")
 
     return "\n".join(lines)
@@ -569,7 +574,7 @@ def format_health_ready(d: dict) -> str:
         f"  Upstreams: {d.get('healthy_upstreams', 0)}/{d.get('total_upstreams', 0)}",
     ]
     if d.get("reason"):
-        lines.append(f"  Причина: {d['reason']}")
+        lines.append(f"  {t('fmt.common.reason')}: {d['reason']}")
     return "\n".join(lines)
 
 
@@ -613,10 +618,10 @@ def format_nat_stun(d: dict) -> str:
     for family in ("v4", "v6"):
         block = reflection.get(family)
         if block:
-            lines.append(f"  {family}: {block.get('addr', '—')}  age {block.get('age_secs', 0)}с")
+            lines.append(f"  {family}: {block.get('addr', '—')}  {t('fmt.common.age')} {block.get('age_secs', 0)}{t('fmt.up.s')}")
     backoff = data.get("stun_backoff_remaining_ms")
     if backoff:
-        lines.append(f"  Backoff: {backoff} мс")
+        lines.append(f"  {t('fmt.rt.backoff')}: {backoff} {t('fmt.common.ms')}")
     return "\n".join(lines)
 
 
@@ -632,7 +637,7 @@ def format_me_selftest(d: dict) -> str:
     lines = [
         "<b>🧪 ME Selftest</b>",
         "",
-        f"  KDF: {kdf.get('state', '?')}  {kdf.get('ewma_errors_per_min', 0):.2f}/мин",
+        f"  KDF: {kdf.get('state', '?')}  {kdf.get('ewma_errors_per_min', 0):.2f}/{t('fmt.common.per_min')}",
         f"  Timeskew: {skew.get('state', '?')}  max15m {skew.get('max_skew_secs_15m', '—')}",
     ]
     for family in ("v4", "v6"):
@@ -687,16 +692,16 @@ def format_minimal_all(d: dict) -> str:
 
 
 def format_active_ips(rows: list) -> str:
-    lines = ["<b>🌐 Активные IP</b>", ""]
+    lines = [f"<b>🌐 {t('fmt.ips.title')}</b>", ""]
     if not rows:
-        lines.append("— нет активных адресов —")
+        lines.append(t("fmt.common.no_addresses"))
         return "\n".join(lines)
     for row in rows[:30]:
         name = html.escape(str(row.get("username", "?")))
         ips = ", ".join(html.escape(str(ip)) for ip in (row.get("active_ips") or []))
         lines.append(f"  <b>{name}</b>  {ips or '—'}")
     if len(rows) > 30:
-        lines.append(f"\n… ещё {len(rows) - 30}")
+        lines.append(t("fmt.common.more_suffix", n=len(rows) - 30))
     return "\n".join(lines)
 
 
@@ -744,13 +749,13 @@ def format_upstream_quality(d: dict) -> str:
     lines = [
         "<b>🔗 Upstream Quality</b>",
         "",
-        f"  Попыток: {attempt:,}  Успешных: {success:,}  Ошибок: {fail:,}",
+        f"  {t('fmt.common.attempts')}: {attempt:,}  {t('fmt.common.ok_of')}: {success:,}  {t('fmt.common.errors_of')}: {fail:,}",
     ]
 
     if summary:
         lines += [
             "",
-            f"  Всего: {summary.get('configured_total',0)}  🟢 {summary.get('healthy_total',0)}  🔴 {summary.get('unhealthy_total',0)}",
+            f"  {t('fmt.common.total')}: {summary.get('configured_total',0)}  🟢 {summary.get('healthy_total',0)}  🔴 {summary.get('unhealthy_total',0)}",
         ]
 
     if upstreams:
@@ -772,7 +777,7 @@ def format_runtime_events(d: dict) -> str:
 
     lines = [f"<b>📋 Recent Events</b>  dropped: {dropped}", ""]
     if not events:
-        lines.append("— нет событий —")
+        lines.append(t("fmt.common.no_events"))
     else:
         for ev in reversed(events[-15:]):
             ts = fmt_ts(ev.get("ts_epoch_secs"))
@@ -796,14 +801,14 @@ def format_connections(d: dict) -> str:
     lines = [
         "<b>👥 Connections</b>",
         "",
-        f"  Всего: <b>{totals.get('current_connections',0):,}</b>",
+        f"  {t('fmt.common.total')}: <b>{totals.get('current_connections',0):,}</b>",
         f"  ME: {totals.get('current_connections_me',0):,}  Direct: {totals.get('current_connections_direct',0):,}",
-        f"  Активных юзеров: {totals.get('active_users',0)}",
+        f"  {t('fmt.conns.active_users')}: {totals.get('active_users',0)}",
     ]
 
     by_conn = top.get("by_connections", [])
     if by_conn:
-        lines.append("\n<b>Топ по соединениям:</b>")
+        lines.append(f"\n<b>{t('fmt.conns.top')}</b>")
         for u in by_conn[:5]:
             lines.append(f"  <code>{u['username']}</code> — {u['current_connections']}🔌 {fmt_bytes(u.get('total_octets',0))}")
 
@@ -817,7 +822,7 @@ def format_security_posture(d: dict) -> str:
         "<b>🛡️ Security Posture</b>",
         "",
         f"  Read-only: {fmt_bool(d.get('api_read_only', False))}",
-        f"  Whitelist: {fmt_bool(d.get('api_whitelist_enabled', False))} ({d.get('api_whitelist_entries',0)} записей)",
+        f"  Whitelist: {fmt_bool(d.get('api_whitelist_enabled', False))} ({d.get('api_whitelist_entries',0)} {t('fmt.common.entries')})",
         f"  Auth header: {fmt_bool(d.get('api_auth_header_enabled', False))}",
         f"  PROXY protocol: {fmt_bool(d.get('proxy_protocol_enabled', False))}",
         f"  Log level: {d.get('log_level','?')}",
@@ -832,8 +837,8 @@ def format_security_whitelist(d: dict) -> str:
     lines = [
         "<b>📋 IP Whitelist</b>",
         "",
-        f"  Активен: {fmt_bool(d.get('enabled', False))}  |  Записей: {d.get('entries_total',0)}",
-        f"  Обновлён: {fmt_ts(d.get('generated_at_epoch_secs'))}",
+        f"  {t('fmt.common.enabled')}: {fmt_bool(d.get('enabled', False))}  |  {t('fmt.common.entries')}: {d.get('entries_total',0)}",
+        f"  {t('fmt.common.updated_short')}: {fmt_ts(d.get('generated_at_epoch_secs'))}",
     ]
     if entries:
         lines.append("")
@@ -850,15 +855,15 @@ def format_limits(d: dict) -> str:
     return "\n".join([
         "<b>⚙️ Effective Limits</b>",
         "",
-        f"  Update interval: {d.get('update_every_secs','?')}с  |  ME reinit: {d.get('me_reinit_every_secs','?')}с",
+        f"  Update interval: {d.get('update_every_secs','?')}{t('fmt.up.s')}  |  ME reinit: {d.get('me_reinit_every_secs','?')}{t('fmt.up.s')}",
         "",
         "<b>Timeouts:</b>",
-        f"  Handshake: {to.get('client_handshake_secs','?')}с  TG connect: {to.get('tg_connect_secs','?')}с",
-        f"  Keepalive: {to.get('client_keepalive_secs','?')}с",
+        f"  Handshake: {to.get('client_handshake_secs','?')}{t('fmt.up.s')}  TG connect: {to.get('tg_connect_secs','?')}{t('fmt.up.s')}",
+        f"  Keepalive: {to.get('client_keepalive_secs','?')}{t('fmt.up.s')}",
         "",
         "<b>Upstream:</b>",
-        f"  Retry: {up.get('connect_retry_attempts','?')} попыток  Backoff: {up.get('connect_retry_backoff_ms','?')}мс",
-        f"  Budget: {up.get('connect_budget_ms','?')}мс",
+        f"  Retry: {up.get('connect_retry_attempts','?')} {t('fmt.common.attempts_short')}  {t('fmt.rt.backoff')}: {up.get('connect_retry_backoff_ms','?')}{t('fmt.common.ms')}",
+        f"  {t('fmt.rt.budget')}: {up.get('connect_budget_ms','?')}{t('fmt.common.ms')}",
         "",
         "<b>Middle Proxy:</b>",
         f"  Floor: {mp.get('floor_mode','?')}  |  ME→DC fallback: {fmt_bool(mp.get('me2dc_fallback', False))}",
@@ -884,12 +889,12 @@ def format_upstreams(d: dict) -> str:
     if summary:
         lines += [
             "",
-            f"  Всего: {summary.get('configured_total',0)}  🟢 {summary.get('healthy_total',0)}  🔴 {summary.get('unhealthy_total',0)}",
+            f"  {t('fmt.common.total')}: {summary.get('configured_total',0)}  🟢 {summary.get('healthy_total',0)}  🔴 {summary.get('unhealthy_total',0)}",
             f"  Direct: {summary.get('direct_total',0)}  SOCKS5: {summary.get('socks5_total',0)}",
         ]
 
     if upstreams:
-        lines.append("\n<b>Список:</b>")
+        lines.append(f"\n<b>{t('fmt.common.list')}</b>")
         for u in upstreams:
             h = "🟢" if u.get("healthy") else "🔴"
             rtt = fmt_rtt(u.get("effective_latency_ms"))
@@ -901,7 +906,7 @@ def format_upstreams(d: dict) -> str:
     if zero:
         a = zero.get("connect_attempt_total", 0)
         s = zero.get("connect_success_total", 0)
-        lines.append(f"\n  Итого: {a:,} попыток / {s:,} успешных")
+        lines.append(f"\n  {t('fmt.common.total')}: {a:,} {t('fmt.common.attempts_short')} / {s:,} {t('fmt.common.ok_short')}")
 
     return "\n".join(lines)
 
@@ -950,7 +955,7 @@ def format_me_writers(d: dict) -> str:
                 f"  {icon} DC{w.get('dc','?')} {w.get('endpoint','?')} | {fmt_rtt(w.get('rtt_ema_ms'))} | {clients}🔌"
             )
         if len(writers) > 50:
-            lines.append(f"  … ещё {len(writers)-50}")
+            lines.append(t("fmt.common.more_suffix", n=len(writers)-50))
 
     return "\n".join(lines)
 
@@ -994,7 +999,7 @@ def format_tls_fingerprints(d: dict) -> str:
         return (
             f"<b>🔍 TLS Fingerprints</b>\n\n"
             f"❌ {reason or 'unavailable'}\n\n"
-            f"<i>Требуется general.beobachten = true в конфиге</i>"
+            f"<i>{t('fmt.fp.requires_beobachten')}</i>"
         )
 
     data         = d.get("data") or {}
@@ -1010,15 +1015,15 @@ def format_tls_fingerprints(d: dict) -> str:
 
     lines = [
         "<b>🔍 TLS Fingerprints</b>",
-        f"<i>Уникальных: {len(by_fp)} | ✅ {auth_total} успешных | 🔴 {bad_total} плохих/зондов</i>",
-        f"<i>Окно: {retention // 60} мин | Отброшено: {dropped} | Ошибок: {parse_err}</i>",
+        f"<i>{t('fmt.common.unique')}: {len(by_fp)} | ✅ {auth_total} {t('fmt.common.ok_short')} | 🔴 {bad_total} {t('fmt.fp.bad_probe')}</i>",
+        f"<i>{t('fmt.common.window')}: {retention // 60} {t('fmt.common.min')} | {t('fmt.common.dropped')}: {dropped} | {t('fmt.common.errors_of')}: {parse_err}</i>",
     ]
 
     sep = "┄" * 20
 
     # ── by_fingerprint ────────────────────────────────────────────────────────
     if by_fp:
-        lines += ["", "<b>По fingerprint:</b>"]
+        lines += ["", f"<b>{t('fmt.fp.by_fp')}</b>"]
         rows = sorted(by_fp, key=lambda x: -x.get("total", 0))[:10]
         for i, fp in enumerate(rows):
             if i > 0:
@@ -1028,7 +1033,7 @@ def format_tls_fingerprints(d: dict) -> str:
     # ── by_ip — только плохие ─────────────────────────────────────────────────
     bad_by_ip = [fp for fp in by_ip if fp.get("bad_or_probe", 0) > 0]
     if bad_by_ip:
-        lines += ["", "<b>🔴 Плохие по IP:</b>"]
+        lines += ["", f"<b>🔴 {t('fmt.fp.bad_by_ip')}</b>"]
         rows = sorted(bad_by_ip, key=lambda x: -x.get("bad_or_probe", 0))[:5]
         for i, fp in enumerate(rows):
             if i > 0:
@@ -1037,7 +1042,7 @@ def format_tls_fingerprints(d: dict) -> str:
 
         # ── by_user ───────────────────────────────────────────────────────────────
     if by_user:
-        lines += ["", "<b>По пользователям:</b>"]
+        lines += ["", f"<b>{t('fmt.fp.by_user')}</b>"]
         user_totals: dict[str, dict] = {}
         for fp in by_user:
             scope = fp.get("scope", "?")
@@ -1091,7 +1096,7 @@ def format_web_status(d: dict) -> str:
     icon = _LIFECYCLE_ICONS.get(lifecycle, "❓")
     available = d.get("available", False)
     age_ms = d.get("lifecycle_age_ms", 0)
-    age_str = f"{age_ms // 60000}м" if age_ms > 60000 else f"{age_ms // 1000}с"
+    age_str = f"{age_ms // 60000}{t('fmt.up.m')}" if age_ms > 60000 else f"{age_ms // 1000}{t('fmt.up.s')}"
     listeners = d.get("listeners", [])
     eff_enabled = d.get("effective_config_enabled", False)
 
@@ -1126,7 +1131,7 @@ def format_web_status(d: dict) -> str:
         if drain:
             drain_phase = drain.get("phase", "?")
             drain_timeout = drain.get("timeout_secs", 0)
-            lines.append(f"  Drain: {drain_phase} (timeout: {drain_timeout}с)")
+            lines.append(f"  Drain: {drain_phase} ({t('fmt.common.timeout_short')}: {drain_timeout}{t('fmt.up.s')})")
 
     rt = d.get("runtime")
     if rt:
@@ -1200,7 +1205,7 @@ def format_web_sessions(data: dict) -> str:
     if not sessions:
         return (
             "<b>🌐 WEB Sessions</b>\n\n"
-            "Активных сессий нет.\n\n"
+            + t("fmt.web.no_sessions") + "\n\n"
             f"<i>🕐 {_now_str()}</i>"
         )
 
@@ -1237,9 +1242,9 @@ def format_web_sessions(data: dict) -> str:
         )
 
     if truncated:
-        lines.append(f"\n<i>⚠️ Показано {len(sessions)} из {total} (scan limit)</i>")
+        lines.append(f"\n<i>⚠️ " + t("fmt.web.shown_of", n=len(sessions), total=total) + "</i>")
     if next_cursor:
-        lines.append(f"<i>Есть ещё (cursor: {next_cursor[:16]}…)</i>")
+        lines.append(f"<i>" + t("fmt.web.more_cursor", cursor=next_cursor[:16]) + "</i>")
 
     lines.append(f"\n<i>🕐 {_now_str()}</i>")
     return "\n".join(lines)
@@ -1299,7 +1304,7 @@ def format_web_session_detail(d: dict) -> str:
     if ws_conns:
         lines.append(f"WebSocket connections: {ws_conns}")
     elif ws_active:
-        lines.append("WebSocket: активен")
+        lines.append(t("fmt.web.ws_active"))
     lines.append(f"Pending: {fmt_bytes(pending)} | Control: {fmt_bytes(control)}")
     lines.append(
         f"Age: {fmt_uptime(age_s)} | Idle: {fmt_uptime(idle_s)} | "

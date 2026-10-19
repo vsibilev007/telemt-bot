@@ -58,6 +58,8 @@ class Config:
     default_server: int = 0
     agents: list[AgentConfig] = field(default_factory=list)
     lite_mode: bool = False
+    # Язык интерфейса бота (общий для всех пользователей): ru | en
+    lang: str = "ru"
     # Прокси для подключения к Telegram API (если доступ ограничен)
     tg_proxy_url: str = ""     # TELEGRAM_PROXY_URL=socks5://user:pass@host:port
                                # или http://user:pass@host:port
@@ -168,6 +170,11 @@ def load_config() -> Config:
         agents.append(AgentConfig(name=name, url=url, token=token, flag=flag))
         i += 1
 
+    # ── Язык интерфейса ──────────────────────────────────────────────────────
+    lang = _clean(os.environ.get("BOT_LANG", "ru")).lower()
+    if lang not in ("ru", "en"):
+        lang = "ru"
+
     return Config(
         bot_token=bot_token,
         allowed_users=allowed_users,
@@ -175,5 +182,6 @@ def load_config() -> Config:
         thresholds=thresholds,
         agents=agents,
         lite_mode=_clean(os.environ.get("LITE_MODE", "false")).lower() in ("true", "1", "yes"),
+        lang=lang,
         tg_proxy_url=_clean(os.environ.get("TELEGRAM_PROXY_URL", "")),
     )

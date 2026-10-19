@@ -19,6 +19,7 @@ from aiogram.types import (
 from api_client import close_http_sessions
 from config import load_config
 from handlers import router
+from i18n import set_lang, t
 from logging_setup import setup_logging
 from middlewares import AuthMiddleware
 import database as db
@@ -32,26 +33,28 @@ async def setup_bot_menu(bot: Bot, config=None):
     """Устанавливает команды в кнопку Меню."""
     lite = config.lite_mode if config else False
     commands = [
-        BotCommand(command="menu",    description="Главное меню"),
-        BotCommand(command="help",    description="Справка по боту"),
-        BotCommand(command="adduser", description="Быстро создать клиента"),
-        BotCommand(command="find",    description="Поиск клиента по имени"),
-        BotCommand(command="id",      description="Ваш Telegram ID"),
+        BotCommand(command="menu",    description=t("cmd.menu")),
+        BotCommand(command="help",    description=t("cmd.help")),
+        BotCommand(command="adduser", description=t("cmd.adduser")),
+        BotCommand(command="find",    description=t("cmd.find")),
+        BotCommand(command="id",      description=t("cmd.id")),
     ]
     if not lite:
         commands += [
-            BotCommand(command="alerts",    description="Настройки алертов"),
-            BotCommand(command="alert_log", description="История последних 20 алертов"),
-            BotCommand(command="check",     description="Диагностика узла по прокси-ссылке"),
-            BotCommand(command="reload",    description="Runtime reload без перезапуска"),
+            BotCommand(command="alerts",    description=t("cmd.alerts")),
+            BotCommand(command="alert_log", description=t("cmd.alert_log")),
+            BotCommand(command="check",     description=t("cmd.check")),
+            BotCommand(command="reload",    description=t("cmd.reload")),
         ]
     await bot.set_my_commands(commands, scope=BotCommandScopeDefault())
     await bot.set_chat_menu_button(menu_button=MenuButtonCommands())
-    logger.info("Меню бота установлено (%d команд)%s", len(commands), " [lite]" if lite else "")
+    logger.info(t("cmd.menu_set"), len(commands), t("cmd.lite_suffix") if lite else "")
 
 
 async def main():
     config = load_config()
+    set_lang(config.lang)
+    logger.info(t("cmd.lang_set"), config.lang)
 
     await db.init_db()
 
@@ -65,7 +68,7 @@ async def main():
         # через параметр proxy= (socks требует aiohttp_socks — он в requirements).
         from aiogram.client.session.aiohttp import AiohttpSession
         bot_kwargs["session"] = AiohttpSession(proxy=config.tg_proxy_url)
-        logger.info("Telegram прокси: %s", config.tg_proxy_url.split("@")[-1])
+        logger.info(t("cmd.tg_proxy"), config.tg_proxy_url.split("@")[-1])
 
     bot = Bot(**bot_kwargs)
     dp = Dispatcher(storage=MemoryStorage())
@@ -80,10 +83,10 @@ async def main():
     if not config.lite_mode:
         sched.setup(bot, config)
     else:
-        logger.info("Lite mode — scheduler и алерты отключены")
+        logger.info(t("sch.lite_on"))
 
     logger.info(
-        "Бот запущен | серверов: %d | юзеров: %d",
+        t("cmd.started"),
         len(config.servers),
         len(config.allowed_users),
     )
@@ -94,7 +97,7 @@ async def main():
         sched.stop()
         await bot.session.close()
         await close_http_sessions()
-        logger.info("Бот остановлен")
+        logger.info(t("cmd.stopped"))
 
 
 if __name__ == "__main__":
