@@ -3,7 +3,9 @@ name: Docker
 on:
   push:
     branches: [main]
-    tags: ["v*.*.*"]
+    # v* — трёх- и двухкомпонентные теги (v1.0.0 / v1.6):
+    # "v*.*.*" не ловил двухкомпонентные, и release-джоба не запускалась.
+    tags: ["v*", "v*.*.*"]
   pull_request:
     branches: [main]
 
@@ -115,9 +117,59 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          # Первая строка RELEASE_BODY.md — заголовок вида "# v1.6 — ..."
+          # Первая строка RELEASE_BODY.md — заголовок вида "# v1.7 — ..."
           TITLE="$(head -1 .github/RELEASE_BODY.md | sed 's/^# //')"
           gh release create "${GITHUB_REF_NAME}" \
             --repo "$GITHUB_REPOSITORY" \
             --title "$TITLE" \
             --notes-file .github/RELEASE_BODY.md
+
+  # Автообновляемый pre-release «rolling»: после каждого успешного билда main
+  # страница Releases показывает свежий список коммитов и ссылку на образ.
+  rolling-release:
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    needs: [lint, test, build-push]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          fetch-depth: 0
+      - name: Update rolling release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SHA: ${{ github.sha }}
+        run: |
+          LAST_TAG="$(git describe --tags --abbrev=0 --exclude 'rolling' 2>/dev/null || true)"
+          {
+            echo "# Сборка main — $(date -u '+%Y-%m-%d %H:%M UTC') ($(git rev-parse --short HEAD))"
+            echo
+            if [ -n "$LAST_TAG" ]; then
+              echo "Стабильный релиз: \`${LAST_TAG}\`."
+              echo
+              echo "Изменения после \`${LAST_TAG}\`:"
+              echo
+              git log "${LAST_TAG}..HEAD" --format='- %h %s' | head -40
+              echo
+              echo "Полный diff: ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/compare/${LAST_TAG}...${SHA}"
+            else
+              echo "Стабильных тегов нет:"
+              echo
+              git log -20 --format='- %h %s'
+            fi
+            echo
+            echo 'Образ этой сборки:'
+            echo '```'
+            echo "docker pull ghcr.io/vsibilev007/telemt-bot:main"
+            echo '```'
+          } > /tmp/rolling.md
+          gh release view rolling --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1 \
+            && gh release edit rolling --repo "$GITHUB_REPOSITORY" \
+                 --notes-file /tmp/rolling.md --prerelease --latest=false \
+            || gh release create rolling --repo "$GITHUB_REPOSITORY" \
+                 --target "$SHA" --title "Latest build (main)" \
+                 --notes-file /tmp/rolling.md --prerelease
+          # тег должен указывать на свежий коммит
+          git tag -f rolling "$SHA"
+          git push -f origin rolling

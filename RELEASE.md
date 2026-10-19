@@ -8,7 +8,8 @@
 - The one-line spec (`guest 5 30`) still works as a fast path: send it in the template step and the bot jumps straight to the preview
 - **Bilingual UI (ru/en)** — all interface strings (commands, buttons, handlers, formatters, alerts, /help) live in `i18n_*.py` tables; switched with the `BOT_LANG=ru|en` environment variable (default `ru`, unchanged behavior)
 - `/help` is now translated and documents the wizard; i18n coverage tests (key definitions, ru+en pairs, placeholder/kwargs consistency) — test suite is now 88 tests
-- Progress "Modal" greeting uses a localized fallback name ("друг"/"friend") when the Telegram profile has no first name
+- **Release automation** — tag trigger broadened to `v*` (two-component tags like v1.6 never fired the release job before); a rolling pre-release "Latest build (main)" is auto-updated on every successful main build with fresh commit list and image info
+- `/start` greetings use a localized fallback name ("друг"/"friend") when the Telegram profile has no first name
 
 ## Bulk User Operations
 
