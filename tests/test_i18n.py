@@ -16,7 +16,8 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 def _call_sites():
     """Все статические t("ключ", ...) вызовы в исходниках бота."""
     for fname in CODE_MODULES:
-        src = open(os.path.join(ROOT, fname), encoding="utf8").read()
+        with open(os.path.join(ROOT, fname), encoding="utf8") as fh:
+            src = fh.read()
         tree = ast.parse(src, filename=fname)
         for node in ast.walk(tree):
             if (
